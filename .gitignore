@@ -128,8 +128,3 @@ cython_debug/
 # IDEs
 .vscode
 .idea/
-
-# Local Data
-data/processed
-mlruns
-mlartifacts
