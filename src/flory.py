@@ -28,6 +28,6 @@ class FloryHuggins(BaseTestProblem):
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
         entropy = torch.sum((X / self.sizes) * torch.log(X + 1e-16), dim=-1)
-        pairwise = 0.5 * torch.einsum("ij,bi,bj->b", self.pairwise, X, X)
+        pairwise = 0.5 * torch.sum((X @ self.pairwise) * X, dim=-1)
         cubic = torch.sum(self.cubic * X**3, dim=-1)
         return entropy + pairwise + cubic
