@@ -7,6 +7,7 @@ rdkit==2023.03.1
 pandas==2.0.3
 seaborn==0.12.2
 umap-learn==0.5.3
+rdflib
 jupyter
 matplotlib
 black

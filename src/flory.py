@@ -4,6 +4,12 @@ import torch
 from botorch.test_functions.base import BaseTestProblem
 
 
+def free_energy(x: torch.Tensor, sizes: torch.Tensor, chi: torch.Tensor) -> torch.Tensor:
+    f_ideal = torch.sum((x / sizes) * torch.log(x + 1e-16), dim=-1)
+    f_int = 0.5 * torch.sum((x @ chi) * x, dim=-1)
+    return f_ideal + f_int
+
+
 class FloryHuggins(BaseTestProblem):
     """A Flory-Huggins free energy model with an additional cubic self-interaction term."""
 
