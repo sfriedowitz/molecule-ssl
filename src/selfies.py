@@ -1,4 +1,4 @@
-from typing import Iterable, Union
+from typing import Iterable
 import selfies as sf
 import torch
 

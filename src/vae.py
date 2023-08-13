@@ -68,7 +68,7 @@ class MolecularVAE(nn.Module):
         return y
 
     def sample(self, z_mean, z_logvar):
-        epsilon = torch.randn_like(z_logvar)
+        epsilon = 1e-2 * torch.randn_like(z_logvar)
         return torch.exp(0.5 * z_logvar) * epsilon + z_mean
 
     def forward(self, x):
