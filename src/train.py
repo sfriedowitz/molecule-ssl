@@ -6,7 +6,13 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 
 from src.vae import MolecularVAE
-from src.tracker import TrainingTracker
+from src.tracker import MetricTracker
+
+
+def reconstruction_count(x: torch.Tensor, x_recon: torch.Tensor):
+    actual_labels = x.argmax(dim=-1)
+    recon_labels = x_recon.argmax(dim=-1)
+    return (recon_labels == actual_labels).all(dim=-1).sum().item()
 
 
 def vae_loss(
@@ -15,16 +21,11 @@ def vae_loss(
     z_mean: torch.Tensor,
     z_logvar: torch.Tensor,
 ):
-    # Cross entropy should be computed across one-hot labels, so transpose tensors so labels in dim=1
+    # Cross entropy should be computed across one-hot labels,
+    # so transpose tensors so labels in dim=1
     bce = F.cross_entropy(x_recon.transpose(2, 1), x.transpose(2, 1), reduction="sum")
     kld = -0.5 * torch.sum(1.0 + z_logvar - z_mean.pow(2) - z_logvar.exp())
     return bce + kld
-
-
-def reconstruction_count(x: torch.Tensor, x_recon: torch.Tensor):
-    actual_labels = x.argmax(dim=-1)
-    recon_labels = x_recon.argmax(dim=-1)
-    return (recon_labels == actual_labels).all(dim=-1).sum().item()
 
 
 def train_one_epoch(
@@ -80,8 +81,8 @@ def train_vae(
     test_loader: DataLoader,
     n_epochs: int,
     print_every: int = 10,
-):
-    tracker = TrainingTracker()
+) -> MetricTracker:
+    tracker = MetricTracker()
     for epoch in range(1, n_epochs + 1):
         train_loss_epoch, train_accuracy_epoch = train_one_epoch(
             model, optimizer, scheduler, train_loader
@@ -96,9 +97,11 @@ def train_vae(
         if epoch == 1 or epoch % print_every == 0:
             current_lr = optimizer.param_groups[0]["lr"]
             print(
-                f"Epoch {epoch} | Train Loss = {train_loss_epoch:.4f} | Test loss = {test_loss_epoch:.4f} | "
-                f"Train Accuracy = {train_accuracy_epoch:.4f} | Test Accuracy = {test_accuracy_epoch:.4f} | "
+                f"Epoch {epoch} | "
+                f"Train Loss = {train_loss_epoch:.4f} | "
+                f"Test loss = {test_loss_epoch:.4f} | "
+                f"Train Accuracy = {train_accuracy_epoch:.4f} | "
+                f"Test Accuracy = {test_accuracy_epoch:.4f} | "
                 f"LR = {current_lr:.3e}"
             )
-
     return tracker

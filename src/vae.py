@@ -10,8 +10,8 @@ INPUT_CHANNELS = 29
 
 # After some trial and error...
 LATENT_SIZE = 50
-ENCODER_HIDDEN_SIZE = 300
-GRU_HIDDEN_SIZE = 400
+ENCODER_HIDDEN_SIZE = 400
+GRU_HIDDEN_SIZE = 500
 
 
 class MolecularVAE(nn.Module):
@@ -66,11 +66,14 @@ class MolecularVAE(nn.Module):
 
         return xr
 
-    def sample(self, z_mean, z_logvar):
-        epsilon = 1e-2 * torch.randn_like(z_logvar)
-        return torch.exp(0.5 * z_logvar) * epsilon + z_mean
+    def reparameterize(self, z_mean, z_logvar):
+        if self.training:
+            epsilon = 1e-2 * torch.randn_like(z_logvar)
+            return z_mean + torch.exp(0.5 * z_logvar) * epsilon
+        else:
+            return z_mean
 
     def forward(self, x):
         z_mean, z_logvar = self.encode(x)
-        z = self.sample(z_mean, z_logvar)
+        z = self.reparameterize(z_mean, z_logvar)
         return self.decode(z), z_mean, z_logvar

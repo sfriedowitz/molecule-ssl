@@ -1,7 +1,7 @@
 import numpy as np
 
 
-class TrainingTracker:
+class MetricTracker:
     def __init__(self):
         self.metrics: dict[str, list[tuple(int, float)]] = dict()
 
