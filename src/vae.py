@@ -8,15 +8,14 @@ from torch import nn
 INPUT_SIZE = 21
 INPUT_CHANNELS = 29
 
+# After some trial and error...
+LATENT_SIZE = 50
+ENCODER_HIDDEN_SIZE = 300
+GRU_HIDDEN_SIZE = 400
+
 
 class MolecularVAE(nn.Module):
-    def __init__(
-        self,
-        *,
-        latent_size: int = 50,
-        encoder_hidden_size: int = 150,
-        gru_hidden_size: int = 200,
-    ):
+    def __init__(self):
         super().__init__()
 
         # Encoder layers
@@ -29,19 +28,19 @@ class MolecularVAE(nn.Module):
             nn.ReLU(),
         )
         self.encoder_linear = nn.Sequential(
-            nn.Linear(80, encoder_hidden_size),
+            nn.Linear(80, ENCODER_HIDDEN_SIZE),
             nn.SELU(),
         )
-        self.encoder_mean = nn.Linear(encoder_hidden_size, latent_size)
-        self.encoder_logvar = nn.Linear(encoder_hidden_size, latent_size)
+        self.encoder_mean = nn.Linear(ENCODER_HIDDEN_SIZE, LATENT_SIZE)
+        self.encoder_logvar = nn.Linear(ENCODER_HIDDEN_SIZE, LATENT_SIZE)
 
         # Decoder layers
         self.decoder_linear = nn.Sequential(
-            nn.Linear(latent_size, latent_size),
+            nn.Linear(LATENT_SIZE, LATENT_SIZE),
             nn.SELU(),
         )
-        self.decoder_gru = nn.GRU(latent_size, gru_hidden_size, 3, batch_first=True)
-        self.decoder_output = nn.Linear(gru_hidden_size, INPUT_CHANNELS)
+        self.decoder_gru = nn.GRU(LATENT_SIZE, GRU_HIDDEN_SIZE, 3, batch_first=True)
+        self.decoder_output = nn.Linear(GRU_HIDDEN_SIZE, INPUT_CHANNELS)
 
     def n_parameters(self) -> int:
         return sum(torch.numel(x) for x in self.parameters())
@@ -62,10 +61,10 @@ class MolecularVAE(nn.Module):
         gru, _ = self.decoder_gru(z)
         gru_flat = gru.contiguous().view(-1, gru.size(-1))
 
-        y = self.decoder_output(gru_flat)
-        y = y.contiguous().view(gru.size(0), -1, y.size(-1))
+        xr = self.decoder_output(gru_flat)
+        xr = xr.contiguous().view(gru.size(0), -1, xr.size(-1))
 
-        return y
+        return xr
 
     def sample(self, z_mean, z_logvar):
         epsilon = 1e-2 * torch.randn_like(z_logvar)
