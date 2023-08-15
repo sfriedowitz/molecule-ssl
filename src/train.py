@@ -12,10 +12,15 @@ from src.tracker import MetricTracker
 def reconstruction_count(x: torch.Tensor, x_recon: torch.Tensor):
     actual_labels = x.argmax(dim=-1)
     recon_labels = x_recon.argmax(dim=-1)
-    return (recon_labels == actual_labels).all(dim=-1).sum().item()
+    return (recon_labels == actual_labels).all(dim=-1).sum()
 
 
-def vae_loss(x: torch.Tensor, x_recon: torch.Tensor, z_mean: torch.Tensor, z_logvar: torch.Tensor):
+def elbo_loss(
+    x: torch.Tensor,
+    x_recon: torch.Tensor,
+    z_mean: torch.Tensor,
+    z_logvar: torch.Tensor,
+):
     # Cross entropy should be computed across one-hot labels,
     # so transpose tensors so labels in dim=1
     cross_entropy = F.cross_entropy(x_recon.transpose(2, 1), x.transpose(2, 1), reduction="sum")
@@ -23,17 +28,8 @@ def vae_loss(x: torch.Tensor, x_recon: torch.Tensor, z_mean: torch.Tensor, z_log
     return cross_entropy + kld
 
 
-def joint_vae_loss(
-    x: torch.Tensor,
-    x_recon: torch.Tensor,
-    y: torch.Tensor,
-    y_pred: torch.Tensor,
-    z_mean: torch.Tensor,
-    z_logvar: torch.Tensor,
-):
-    vae = vae_loss(x, x_recon, z_mean, z_logvar)
-    mse = F.mse_loss(y_pred, y, reduction="sum")
-    return vae + mse
+def mse_loss(y: torch.Tensor, y_pred: torch.Tensor):
+    return F.mse_loss(y_pred, y, reduction="sum")
 
 
 def train_one_epoch(
@@ -45,52 +41,51 @@ def train_one_epoch(
 ):
     model.train()
 
-    total_loss = 0.0
-    total_recon = 0
+    metrics = {"train_elbo": 0.0, "train_mse": 0.0, "train_accuracy": 0.0}
     for x_batch, y_batch in data_loader:
-        optimizer.zero_grad()
+        x_recon, y_pred, z_mean, z_logvar = model(x_batch)
+
+        elbo = elbo_loss(x_batch, x_recon, z_mean, z_logvar)
+        mse = mse_loss(y_batch, y_pred)
+        recon = reconstruction_count(x_batch, x_recon)
+
         if include_mse:
-            x_recon, y_pred, z_mean, z_logvar = model(x_batch)
-            loss = joint_vae_loss(x_batch, x_recon, y_batch, y_pred, z_mean, z_logvar, y_pred)
+            loss = elbo + mse
         else:
-            x_recon, _, z_mean, z_logvar = model(x_batch)
-            loss = vae_loss(x_batch, x_recon, z_mean, z_logvar)
+            loss = elbo
+
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        total_loss += loss.item()
-        total_recon += reconstruction_count(x_batch, x_recon)
+        metrics["train_elbo"] += elbo.item()
+        metrics["train_mse"] += mse.item()
+        metrics["train_accuracy"] += recon.item()
 
     if scheduler is not None:
         scheduler.step()
 
     n = len(data_loader.dataset)
-    return total_loss / n, total_recon / n
+    return {k: v / n for k, v in metrics.items()}
 
 
 @torch.no_grad()
-def test_one_epoch(
-    model: MolecularVAE,
-    data_loader: DataLoader,
-    include_mse: bool,
-):
+def test_one_epoch(model: MolecularVAE, data_loader: DataLoader):
     model.eval()
 
-    total_loss = 0.0
-    total_recon = 0
+    metrics = {"test_elbo": 0.0, "test_mse": 0.0, "test_accuracy": 0.0}
     for x_batch, y_batch in data_loader:
-        if include_mse:
-            x_recon, y_pred, z_mean, z_logvar = model(x_batch)
-            loss = joint_vae_loss(x_batch, x_recon, y_batch, y_pred, z_mean, z_logvar, y_pred)
-        else:
-            x_recon, _, z_mean, z_logvar = model(x_batch)
-            loss = vae_loss(x_batch, x_recon, z_mean, z_logvar)
+        x_recon, y_pred, z_mean, z_logvar = model(x_batch)
+        elbo = elbo_loss(x_batch, x_recon, z_mean, z_logvar)
+        mse = mse_loss(y_batch, y_pred)
+        recon = reconstruction_count(x_batch, x_recon)
 
-        total_loss += loss.item()
-        total_recon += reconstruction_count(x_batch, x_recon)
+        metrics["test_elbo"] += elbo.item()
+        metrics["test_mse"] += mse.item()
+        metrics["test_accuracy"] += recon.item()
 
     n = len(data_loader.dataset)
-    return total_loss / n, total_recon / n
+    return {k: v / n for k, v in metrics.items()}
 
 
 def train_vae(
@@ -106,24 +101,22 @@ def train_vae(
 ) -> MetricTracker:
     tracker = MetricTracker()
     for epoch in range(1, n_epochs + 1):
-        train_loss_epoch, train_accuracy_epoch = train_one_epoch(
-            model, optimizer, scheduler, train_loader, include_mse
-        )
-        test_loss_epoch, test_accuracy_epoch = test_one_epoch(model, test_loader, include_mse)
+        train_metrics = train_one_epoch(model, optimizer, scheduler, train_loader, include_mse)
+        test_metrics = test_one_epoch(model, test_loader)
 
-        tracker.record_metric("train_loss", epoch, train_loss_epoch)
-        tracker.record_metric("train_accuracy", epoch, train_accuracy_epoch)
-        tracker.record_metric("test_loss", epoch, test_loss_epoch)
-        tracker.record_metric("test_accuracy", epoch, test_accuracy_epoch)
+        metrics = {**train_metrics, **test_metrics}
+        tracker.record(epoch, metrics)
 
         if epoch == 1 or epoch % print_every == 0:
-            current_lr = optimizer.param_groups[0]["lr"]
-            print(
-                f"Epoch {epoch} | "
-                f"Train Loss = {train_loss_epoch:.4f} | "
-                f"Test loss = {test_loss_epoch:.4f} | "
-                f"Train Accuracy = {train_accuracy_epoch:.4f} | "
-                f"Test Accuracy = {test_accuracy_epoch:.4f} | "
-                f"LR = {current_lr:.3e}"
+            tracker.log(
+                [
+                    "train_elbo",
+                    "test_elbo",
+                    "train_mse",
+                    "test_mse",
+                    "train_accuracy",
+                    "test_accuracy",
+                ]
             )
+
     return tracker
