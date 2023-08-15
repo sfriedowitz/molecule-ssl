@@ -15,12 +15,7 @@ def reconstruction_count(x: torch.Tensor, x_recon: torch.Tensor):
     return (recon_labels == actual_labels).all(dim=-1).sum().item()
 
 
-def vae_loss(
-    x: torch.Tensor,
-    x_recon: torch.Tensor,
-    z_mean: torch.Tensor,
-    z_logvar: torch.Tensor,
-):
+def vae_loss(x: torch.Tensor, x_recon: torch.Tensor, z_mean: torch.Tensor, z_logvar: torch.Tensor):
     # Cross entropy should be computed across one-hot labels,
     # so transpose tensors so labels in dim=1
     cross_entropy = F.cross_entropy(x_recon.transpose(2, 1), x.transpose(2, 1), reduction="sum")
@@ -28,26 +23,43 @@ def vae_loss(
     return cross_entropy + kld
 
 
+def joint_vae_loss(
+    x: torch.Tensor,
+    x_recon: torch.Tensor,
+    y: torch.Tensor,
+    y_pred: torch.Tensor,
+    z_mean: torch.Tensor,
+    z_logvar: torch.Tensor,
+):
+    vae = vae_loss(x, x_recon, z_mean, z_logvar)
+    mse = F.mse_loss(y_pred, y, reduction="sum")
+    return vae + mse
+
+
 def train_one_epoch(
     model: MolecularVAE,
     optimizer: Optimizer,
     scheduler: Optional[LRScheduler],
     data_loader: DataLoader,
+    include_mse: bool,
 ):
     model.train()
 
     total_loss = 0.0
     total_recon = 0
-    for batch in data_loader:
-        x = batch[0]
+    for x_batch, y_batch in data_loader:
         optimizer.zero_grad()
-        x_recon, z_mean, z_logvar = model(x)
-        loss = vae_loss(x, x_recon, z_mean, z_logvar)
+        if include_mse:
+            x_recon, y_pred, z_mean, z_logvar = model(x_batch)
+            loss = joint_vae_loss(x_batch, x_recon, y_batch, y_pred, z_mean, z_logvar, y_pred)
+        else:
+            x_recon, _, z_mean, z_logvar = model(x_batch)
+            loss = vae_loss(x_batch, x_recon, z_mean, z_logvar)
         loss.backward()
         optimizer.step()
 
         total_loss += loss.item()
-        total_recon += reconstruction_count(x, x_recon)
+        total_recon += reconstruction_count(x_batch, x_recon)
 
     if scheduler is not None:
         scheduler.step()
@@ -57,17 +69,25 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def test_one_epoch(model: MolecularVAE, data_loader: DataLoader):
+def test_one_epoch(
+    model: MolecularVAE,
+    data_loader: DataLoader,
+    include_mse: bool,
+):
     model.eval()
 
     total_loss = 0.0
     total_recon = 0
-    for batch in data_loader:
-        x = batch[0]
-        x_recon, z_mean, z_logvar = model(x)
-        loss = vae_loss(x, x_recon, z_mean, z_logvar)
+    for x_batch, y_batch in data_loader:
+        if include_mse:
+            x_recon, y_pred, z_mean, z_logvar = model(x_batch)
+            loss = joint_vae_loss(x_batch, x_recon, y_batch, y_pred, z_mean, z_logvar, y_pred)
+        else:
+            x_recon, _, z_mean, z_logvar = model(x_batch)
+            loss = vae_loss(x_batch, x_recon, z_mean, z_logvar)
+
         total_loss += loss.item()
-        total_recon += reconstruction_count(x, x_recon)
+        total_recon += reconstruction_count(x_batch, x_recon)
 
     n = len(data_loader.dataset)
     return total_loss / n, total_recon / n
@@ -79,15 +99,17 @@ def train_vae(
     scheduler: Optional[LRScheduler],
     train_loader: DataLoader,
     test_loader: DataLoader,
+    *,
     n_epochs: int,
+    include_mse: bool,
     print_every: int = 10,
 ) -> MetricTracker:
     tracker = MetricTracker()
     for epoch in range(1, n_epochs + 1):
         train_loss_epoch, train_accuracy_epoch = train_one_epoch(
-            model, optimizer, scheduler, train_loader
+            model, optimizer, scheduler, train_loader, include_mse
         )
-        test_loss_epoch, test_accuracy_epoch = test_one_epoch(model, test_loader)
+        test_loss_epoch, test_accuracy_epoch = test_one_epoch(model, test_loader, include_mse)
 
         tracker.record_metric("train_loss", epoch, train_loss_epoch)
         tracker.record_metric("train_accuracy", epoch, train_accuracy_epoch)

@@ -1,19 +1,6 @@
-import os
-import sys
-
 import torch
 import numpy as np
 import scipy
-
-
-def sascore(mol) -> float:
-    from rdkit.Chem import RDConfig
-
-    sys.path.append(os.path.join(RDConfig.RDContribDir, "SA_Score"))
-
-    import sascorer
-
-    return sascorer.calculateScore(mol)
 
 
 def uniform_simplex(size, *, dim: int) -> torch.Tensor:

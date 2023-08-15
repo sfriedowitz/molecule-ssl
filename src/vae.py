@@ -11,13 +11,17 @@ from src.utils import slerp
 INPUT_SIZE = 21
 INPUT_CHANNELS = 29
 
-# After some trial and error...
-ENCODER_HIDDEN_SIZE = 400
-GRU_HIDDEN_SIZE = 500
-
 
 class MolecularVAE(nn.Module):
-    def __init__(self, latent_size: int, *, sample_eps: float = 1e-2):
+    def __init__(
+        self,
+        latent_size: int,
+        *,
+        encoder_hidden_size: int = 400,
+        gru_hidden_size: int = 500,
+        mlp_hidden_size: int = 300,
+        sample_eps: float = 1e-2,
+    ):
         super().__init__()
 
         self.latent_size = latent_size
@@ -33,19 +37,25 @@ class MolecularVAE(nn.Module):
             nn.ReLU(),
         )
         self.encoder_linear = nn.Sequential(
-            nn.Linear(80, ENCODER_HIDDEN_SIZE),
+            nn.Linear(80, encoder_hidden_size),
             nn.SELU(),
         )
-        self.encoder_mean = nn.Linear(ENCODER_HIDDEN_SIZE, latent_size)
-        self.encoder_logvar = nn.Linear(ENCODER_HIDDEN_SIZE, latent_size)
+        self.encoder_mean = nn.Linear(encoder_hidden_size, latent_size)
+        self.encoder_logvar = nn.Linear(encoder_hidden_size, latent_size)
 
         # Decoder layers
         self.decoder_linear = nn.Sequential(
             nn.Linear(latent_size, latent_size),
             nn.SELU(),
         )
-        self.decoder_gru = nn.GRU(latent_size, GRU_HIDDEN_SIZE, 3, batch_first=True)
-        self.decoder_output = nn.Linear(GRU_HIDDEN_SIZE, INPUT_CHANNELS)
+        self.decoder_gru = nn.GRU(latent_size, gru_hidden_size, 3, batch_first=True)
+        self.decoder_output = nn.Linear(gru_hidden_size, INPUT_CHANNELS)
+
+        self.mlp = nn.Sequential(
+            nn.Linear(self.latent_size, mlp_hidden_size),
+            nn.ReLU(),
+            nn.Linear(mlp_hidden_size, 1),
+        )
 
     def n_parameters(self) -> int:
         return sum(torch.numel(x) for x in self.parameters())
@@ -78,10 +88,10 @@ class MolecularVAE(nn.Module):
         else:
             return z_mean
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         z_mean, z_logvar = self.encode(x)
         z = self.reparameterize(z_mean, z_logvar)
-        return self.decode(z), z_mean, z_logvar
+        return self.decode(z), self.mlp(z), z_mean, z_logvar
 
     def sample(self, *, generator: Optional[torch.Generator] = None) -> torch.Tensor:
         z = self.sample_eps * torch.randn((1, self.latent_size), generator=generator)
