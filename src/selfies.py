@@ -26,7 +26,7 @@ class SelfiesEncoder:
             enc_type="label",
         )
 
-    def encode_one_hot(self, selfie: str) -> list[int]:
+    def encode_one_hot(self, selfie: str) -> list[list[int]]:
         return sf.selfies_to_encoding(
             selfies=selfie,
             vocab_stoi=self.symbol_to_idx,
@@ -34,20 +34,22 @@ class SelfiesEncoder:
             enc_type="one_hot",
         )
 
-    def decode_label(self, encoding: list[int]) -> str:
-        return sf.encoding_to_selfies(
+    def decode_labels(self, encoding: list[int]) -> str:
+        s = sf.encoding_to_selfies(
             encoding=encoding,
             vocab_itos=self.idx_to_symbol,
             enc_type="label",
         )
+        return s.replace("[nop]", "")
 
     def decode_one_hot(self, encoding: list[list[int]]) -> str:
-        return sf.encoding_to_selfies(
+        s = sf.encoding_to_selfies(
             encoding=encoding,
             vocab_itos=self.idx_to_symbol,
             enc_type="one_hot",
         )
+        return s.replace("[nop]", "")
 
-    def decode_tensor(self, x: torch.Tensor) -> list[str]:
+    def decode_tensor(self, x: torch.Tensor) -> str:
         labels = x.argmax(dim=-1).tolist()
-        return [self.decode_label(l) for l in labels]
+        return self.decode_labels(labels)

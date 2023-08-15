@@ -1,5 +1,8 @@
+from typing import Optional
 import torch
 from torch import nn
+
+from src.utils import slerp
 
 
 # Determined from selfies encoding of QM9 dataset
@@ -9,14 +12,16 @@ INPUT_SIZE = 21
 INPUT_CHANNELS = 29
 
 # After some trial and error...
-LATENT_SIZE = 50
 ENCODER_HIDDEN_SIZE = 400
 GRU_HIDDEN_SIZE = 500
 
 
 class MolecularVAE(nn.Module):
-    def __init__(self):
+    def __init__(self, latent_size: int, *, sample_eps: float = 1e-2):
         super().__init__()
+
+        self.latent_size = latent_size
+        self.sample_eps = sample_eps
 
         # Encoder layers
         self.encoder_conv = nn.Sequential(
@@ -31,15 +36,15 @@ class MolecularVAE(nn.Module):
             nn.Linear(80, ENCODER_HIDDEN_SIZE),
             nn.SELU(),
         )
-        self.encoder_mean = nn.Linear(ENCODER_HIDDEN_SIZE, LATENT_SIZE)
-        self.encoder_logvar = nn.Linear(ENCODER_HIDDEN_SIZE, LATENT_SIZE)
+        self.encoder_mean = nn.Linear(ENCODER_HIDDEN_SIZE, latent_size)
+        self.encoder_logvar = nn.Linear(ENCODER_HIDDEN_SIZE, latent_size)
 
         # Decoder layers
         self.decoder_linear = nn.Sequential(
-            nn.Linear(LATENT_SIZE, LATENT_SIZE),
+            nn.Linear(latent_size, latent_size),
             nn.SELU(),
         )
-        self.decoder_gru = nn.GRU(LATENT_SIZE, GRU_HIDDEN_SIZE, 3, batch_first=True)
+        self.decoder_gru = nn.GRU(latent_size, GRU_HIDDEN_SIZE, 3, batch_first=True)
         self.decoder_output = nn.Linear(GRU_HIDDEN_SIZE, INPUT_CHANNELS)
 
     def n_parameters(self) -> int:
@@ -68,7 +73,7 @@ class MolecularVAE(nn.Module):
 
     def reparameterize(self, z_mean, z_logvar):
         if self.training:
-            epsilon = 1e-2 * torch.randn_like(z_logvar)
+            epsilon = self.sample_eps * torch.randn_like(z_logvar)
             return z_mean + torch.exp(0.5 * z_logvar) * epsilon
         else:
             return z_mean
@@ -77,3 +82,16 @@ class MolecularVAE(nn.Module):
         z_mean, z_logvar = self.encode(x)
         z = self.reparameterize(z_mean, z_logvar)
         return self.decode(z), z_mean, z_logvar
+
+    def sample(self, *, generator: Optional[torch.Generator] = None) -> torch.Tensor:
+        z = self.sample_eps * torch.randn((1, self.latent_size), generator=generator)
+        return self.decode(z)[0]
+
+    def interpolate(self, x_start: torch.Tensor, x_end: torch.Tensor, n: int) -> torch.Tensor:
+        z_start = self.encode(x_start.unsqueeze(0))[0]
+        z_end = self.encode(x_end.unsqueeze(0))[0]
+        z_interp = [
+            slerp(z_start.squeeze(), z_end.squeeze(), t) for t in torch.linspace(0.0, 1.0, n)
+        ]
+        z_interp = torch.stack(z_interp)
+        return self.decode(z_interp)

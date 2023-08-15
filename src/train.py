@@ -23,9 +23,9 @@ def vae_loss(
 ):
     # Cross entropy should be computed across one-hot labels,
     # so transpose tensors so labels in dim=1
-    bce = F.cross_entropy(x_recon.transpose(2, 1), x.transpose(2, 1), reduction="sum")
+    cross_entropy = F.cross_entropy(x_recon.transpose(2, 1), x.transpose(2, 1), reduction="sum")
     kld = -0.5 * torch.sum(1.0 + z_logvar - z_mean.pow(2) - z_logvar.exp())
-    return bce + kld
+    return cross_entropy + kld
 
 
 def train_one_epoch(
