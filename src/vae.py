@@ -19,13 +19,11 @@ class MolecularVAE(nn.Module):
         *,
         encoder_hidden_size: int = 400,
         gru_hidden_size: int = 500,
-        mlp_hidden_size: int = 300,
-        eps: float = 1e-2,
+        mlp_hidden_size: int = 300
     ):
         super().__init__()
 
         self.latent_size = latent_size
-        self.eps = eps
 
         # Encoder layers
         self.encoder_conv = nn.Sequential(
@@ -86,7 +84,7 @@ class MolecularVAE(nn.Module):
 
     def reparameterize(self, z_mean, z_logvar):
         if self.training:
-            epsilon = self.eps * torch.randn_like(z_logvar)
+            epsilon = torch.randn_like(z_logvar)
             return z_mean + torch.exp(0.5 * z_logvar) * epsilon
         else:
             return z_mean
@@ -96,8 +94,8 @@ class MolecularVAE(nn.Module):
         z = self.reparameterize(z_mean, z_logvar)
         return self.decode(z), self.mlp(z), z_mean, z_logvar
 
-    def sample(self, *, generator: Optional[torch.Generator] = None) -> torch.Tensor:
-        z = self.eps * torch.randn((1, self.latent_size), generator=generator)
+    def sample(self, n: int, *, generator: Optional[torch.Generator] = None) -> torch.Tensor:
+        z = torch.randn((n, self.latent_size), generator=generator)
         return self.decode(z)[0]
 
     def interpolate(self, x_start: torch.Tensor, x_end: torch.Tensor, n: int) -> torch.Tensor:
