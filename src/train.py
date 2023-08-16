@@ -11,15 +11,14 @@ from src.tracker import MetricTracker
 
 
 class VAELoss(nn.Module):
-    def __init__(self, *, include_mse: bool, kld_scale: float = 1e-5):
+    def __init__(self, *, include_mse: bool):
         super().__init__()
         self.include_mse = include_mse
-        self.kld_scale = kld_scale
 
         # Cache values from forward pass for tracking
-        self.elbo: Optional[float] = None
-        self.mse: Optional[float] = None
-        self.recon: Optional[int] = None
+        self.current_elbo: Optional[float] = None
+        self.current_mse: Optional[float] = None
+        self.current_recon: Optional[int] = None
 
     def forward(
         self,
@@ -34,7 +33,7 @@ class VAELoss(nn.Module):
         # so transpose tensors so labels in dim=1
         cross_entropy = F.cross_entropy(xr.transpose(2, 1), x.transpose(2, 1), reduction="sum")
         kld = -0.5 * torch.sum(1.0 + z_logvar - z_mean.pow(2) - z_logvar.exp())
-        elbo = cross_entropy + self.kld_scale * kld
+        elbo = cross_entropy + kld
         mse = F.mse_loss(y_hat, y, reduction="sum")
 
         loss = elbo
@@ -43,9 +42,9 @@ class VAELoss(nn.Module):
 
         recon = (x.argmax(dim=-1) == xr.argmax(dim=-1)).all(dim=-1).sum()
 
-        self.elbo = elbo.item()
-        self.mse = mse.item()
-        self.recon = recon.item()
+        self.current_elbo = elbo.item()
+        self.current_mse = mse.item()
+        self.current_recon = recon.item()
 
         return loss
 
@@ -68,9 +67,9 @@ def train_one_epoch(
         loss.backward()
         optimizer.step()
 
-        metrics["train_elbo"] += criterion.elbo
-        metrics["train_mse"] += criterion.mse
-        metrics["train_accuracy"] += criterion.recon
+        metrics["train_elbo"] += criterion.current_elbo
+        metrics["train_mse"] += criterion.current_mse
+        metrics["train_accuracy"] += criterion.current_recon
 
     if scheduler is not None:
         scheduler.step()
@@ -88,9 +87,9 @@ def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoa
         x_recon, y_hat, z_mean, z_logvar = model(x)
         _ = criterion(x, x_recon, y, y_hat, z_mean, z_logvar)
 
-        metrics["test_elbo"] += criterion.elbo
-        metrics["test_mse"] += criterion.mse
-        metrics["test_accuracy"] += criterion.recon
+        metrics["test_elbo"] += criterion.current_elbo
+        metrics["test_mse"] += criterion.current_mse
+        metrics["test_accuracy"] += criterion.current_recon
 
     n = len(data_loader.dataset)
     return {k: v / n for k, v in metrics.items()}
@@ -112,8 +111,8 @@ def train_vae(
         train_metrics = train_one_epoch(model, criterion, optimizer, scheduler, train_loader)
         test_metrics = test_one_epoch(model, criterion, test_loader)
 
-        metrics = {**train_metrics, **test_metrics}
-        tracker.record(epoch, metrics)
+        epoch_metrics = {**train_metrics, **test_metrics}
+        tracker.record(epoch, epoch_metrics)
 
         if epoch == 1 or epoch % print_every == 0:
             tracker.log(
