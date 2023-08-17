@@ -6,13 +6,13 @@ from torch import nn
 import torch.nn.functional as F
 
 
-class BetaAnnealing(ABC):
+class KLScheduler(ABC):
     @abstractmethod
     def get_beta(self, epoch: int) -> float:
         pass
 
 
-class ConstantAnnealing(BetaAnnealing):
+class ConstantScheduler(KLScheduler):
     def __init__(self, beta: float):
         self.beta = beta
 
@@ -20,7 +20,7 @@ class ConstantAnnealing(BetaAnnealing):
         return self.beta
 
 
-class SigmoidAnnealing(BetaAnnealing):
+class SigmoidScheduler(KLScheduler):
     def __init__(self, *, start_epoch: int, rate: float = 1.0, scale: float = 1.0):
         self.start_epoch = start_epoch
         self.rate = rate
@@ -33,14 +33,8 @@ class SigmoidAnnealing(BetaAnnealing):
         return self.scale * sigmoid
 
 
-class CyclicAnnealing(BetaAnnealing):
-    def __init__(
-        self,
-        *,
-        period: int,
-        scale: float = 1.0,
-        ratio: float = 0.75,
-    ):
+class CyclicScheduler(KLScheduler):
+    def __init__(self, *, period: int, scale: float = 1.0, ratio: float = 0.75):
         self.period = period
         self.scale = scale
         self.ratio = ratio
@@ -53,10 +47,9 @@ class CyclicAnnealing(BetaAnnealing):
 
 
 class VAELoss(nn.Module):
-    def __init__(self, *, include_mse: bool, beta_annealing: BetaAnnealing):
+    def __init__(self, kl_scheduler: KLScheduler):
         super().__init__()
-        self.include_mse = include_mse
-        self.beta_annealing = beta_annealing
+        self.kl_scheduler = kl_scheduler
 
         # Cache values from forward pass for tracking
         self.current_elbo: Optional[float] = None
@@ -77,16 +70,11 @@ class VAELoss(nn.Module):
         # so transpose tensors so labels in dim=1
         ce = F.cross_entropy(xr.transpose(2, 1), x.transpose(2, 1), reduction="sum")
         kld = -0.5 * torch.sum(1.0 + z_logvar - z_mean.pow(2) - z_logvar.exp())
+        mse = F.mse_loss(y_hat, y, reduction="sum")
 
-        beta = self.beta_annealing.get_beta(epoch)
+        beta = self.kl_scheduler.get_beta(epoch)
         elbo = ce + beta * kld
-
-        loss = elbo
-        if self.include_mse:
-            mse = F.mse_loss(y_hat, y, reduction="sum")
-            loss += mse
-        else:
-            mse = torch.tensor(0.0)
+        loss = elbo + mse
 
         recon = (x.argmax(dim=-1) == xr.argmax(dim=-1)).all(dim=-1).sum()
 

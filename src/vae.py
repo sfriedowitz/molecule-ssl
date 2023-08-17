@@ -46,7 +46,7 @@ class MolecularVAE(nn.Module):
             nn.Linear(latent_size, latent_size),
             nn.SELU(),
         )
-        self.decoder_gru = nn.GRU(latent_size, gru_hidden_size, 3, batch_first=True)
+        self.decoder_gru = nn.GRU(latent_size, gru_hidden_size, 3, batch_first=True, dropout=0.1)
         self.decoder_output = nn.Linear(gru_hidden_size, INPUT_CHANNELS)
 
         # Regresssion layer
@@ -96,7 +96,7 @@ class MolecularVAE(nn.Module):
 
     def sample(self, n: int, *, generator: Optional[torch.Generator] = None) -> torch.Tensor:
         z = torch.randn((n, self.latent_size), generator=generator)
-        return self.decode(z)[0]
+        return self.decode(z)
 
     def interpolate(self, x_start: torch.Tensor, x_end: torch.Tensor, n: int) -> torch.Tensor:
         z_start = self.encode(x_start.unsqueeze(0))[0]
