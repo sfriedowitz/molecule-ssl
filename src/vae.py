@@ -19,7 +19,13 @@ class MolecularVAE(nn.Module):
         *,
         encoder_hidden_size: int = 400,
         gru_hidden_size: int = 500,
-        mlp_hidden_size: int = 300
+        mlp_hidden_size: int = 300,
+        encoder_dropout: float = 0.0,
+        decoder_dropout: float = 0.0,
+        gru_dropout: float = 0.0,
+        mlp_dropout: float = 0.0,
+        gru_layers: int = 3,
+        mlp_targets: int = 1,
     ):
         super().__init__()
 
@@ -37,6 +43,7 @@ class MolecularVAE(nn.Module):
         self.encoder_linear = nn.Sequential(
             nn.Linear(80, encoder_hidden_size),
             nn.SELU(),
+            nn.Dropout(p=encoder_dropout),
         )
         self.encoder_mean = nn.Linear(encoder_hidden_size, latent_size)
         self.encoder_logvar = nn.Linear(encoder_hidden_size, latent_size)
@@ -45,17 +52,26 @@ class MolecularVAE(nn.Module):
         self.decoder_linear = nn.Sequential(
             nn.Linear(latent_size, latent_size),
             nn.SELU(),
+            nn.Dropout(p=decoder_dropout),
         )
-        self.decoder_gru = nn.GRU(latent_size, gru_hidden_size, 3, batch_first=True, dropout=0.1)
+        self.decoder_gru = nn.GRU(
+            latent_size,
+            gru_hidden_size,
+            num_layers=gru_layers,
+            dropout=gru_dropout,
+            batch_first=True,
+        )
         self.decoder_output = nn.Linear(gru_hidden_size, INPUT_CHANNELS)
 
         # Regresssion layer
         self.mlp = nn.Sequential(
             nn.Linear(self.latent_size, mlp_hidden_size),
             nn.ReLU(),
+            nn.Dropout(p=mlp_dropout),
             nn.Linear(mlp_hidden_size, mlp_hidden_size),
             nn.ReLU(),
-            nn.Linear(mlp_hidden_size, 1),
+            nn.Dropout(p=mlp_dropout),
+            nn.Linear(mlp_hidden_size, mlp_targets),
         )
 
     def n_parameters(self) -> int:
