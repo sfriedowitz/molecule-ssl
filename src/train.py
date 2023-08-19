@@ -16,7 +16,6 @@ def train_one_epoch(
     optimizer: Optimizer,
     scheduler: Optional[LRScheduler],
     data_loader: DataLoader,
-    epoch: int,
 ):
     model.train()
 
@@ -24,12 +23,12 @@ def train_one_epoch(
     for x, y in data_loader:
         x_recon, y_hat, z_mean, z_logvar = model(x)
 
-        loss = criterion(x, x_recon, y, y_hat, z_mean, z_logvar, epoch)
+        loss = criterion(x, x_recon, y, y_hat, z_mean, z_logvar)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
-        metrics["train_elbo"] += criterion.current_elbo
+        metrics["train_elbo"] += criterion.current_ce
         metrics["train_mse"] += criterion.current_mse
         metrics["train_accuracy"] += criterion.current_recon
 
@@ -41,15 +40,15 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoader, epoch: int):
+def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoader):
     model.eval()
 
     metrics = {"test_elbo": 0.0, "test_mse": 0.0, "test_accuracy": 0.0}
     for x, y in data_loader:
         x_recon, y_hat, z_mean, z_logvar = model(x)
-        _ = criterion(x, x_recon, y, y_hat, z_mean, z_logvar, epoch)
+        _ = criterion(x, x_recon, y, y_hat, z_mean, z_logvar)
 
-        metrics["test_elbo"] += criterion.current_elbo
+        metrics["test_elbo"] += criterion.current_ce
         metrics["test_mse"] += criterion.current_mse
         metrics["test_accuracy"] += criterion.current_recon
 
@@ -70,10 +69,8 @@ def train_vae(
 ) -> MetricTracker:
     tracker = MetricTracker()
     for epoch in range(n_epochs):
-        train_metrics = train_one_epoch(
-            model, criterion, optimizer, scheduler, train_loader, epoch
-        )
-        test_metrics = test_one_epoch(model, criterion, test_loader, epoch)
+        train_metrics = train_one_epoch(model, criterion, optimizer, scheduler, train_loader)
+        test_metrics = test_one_epoch(model, criterion, test_loader)
 
         epoch_metrics = {**train_metrics, **test_metrics}
         tracker.record(epoch, epoch_metrics)
