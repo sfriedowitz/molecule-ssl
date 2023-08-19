@@ -1,25 +1,15 @@
-from typing import Optional
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from deepchem.feat.molecule_featurizers import RDKitDescriptors
 from rdkit.Chem import Descriptors
 from rdkit.Contrib.SA_Score import sascorer
+from deepchem.feat.molecule_featurizers import RDKitDescriptors
 
 
-def compressed_rdkit_descriptors(
-    mols,
-    *,
-    n_components: Optional[int] = None,
-    use_fragment: bool = False,
-    scale: bool = True,
-):
-    calc = RDKitDescriptors(use_fragment=use_fragment)
-    descriptors = calc.featurize(mols)
-    if n_components:
-        descriptors = PCA(n_components=n_components).fit_transform(descriptors)
-    if scale:
-        descriptors = StandardScaler().fit_transform(descriptors)
-    return descriptors
+def rdkit_features(smiles, *, descriptors=None, use_fragment=False):
+    featurizer = RDKitDescriptors(use_fragment=use_fragment)
+    if descriptors is not None:
+        filtered_list = [(name, fx) for name, fx in Descriptors.descList if name in descriptors]
+        featurizer.descList = filtered_list
+        featurizer.descriptors = descriptors
+    return featurizer.featurize(smiles)
 
 
 def largest_ring_size(mol):

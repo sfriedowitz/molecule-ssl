@@ -1,13 +1,13 @@
 import torch
 
 
-class StandardScaler:
+class Standardizer:
     def __init__(self, mean: torch.Tensor, std: torch.Tensor):
         self._mean = mean
         self._std = std
 
     @classmethod
-    def build(cls, x: torch.Tensor) -> "StandardScaler":
+    def build(cls, x: torch.Tensor) -> "Standardizer":
         x_mean = x.mean(dim=0)
         x_std = x.std(dim=0, keepdim=True)
         x_std = x_std.where(x_std >= 1e-9, torch.full_like(x_std, 1.0))

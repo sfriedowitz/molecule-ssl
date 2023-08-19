@@ -16,16 +16,13 @@ class MolecularVAE(nn.Module):
     def __init__(
         self,
         latent_size: int,
+        target_size: int,
         *,
         encoder_hidden_size: int = 400,
         gru_hidden_size: int = 500,
         mlp_hidden_size: int = 300,
-        encoder_dropout: float = 0.0,
-        decoder_dropout: float = 0.0,
         gru_dropout: float = 0.0,
-        mlp_dropout: float = 0.0,
         gru_layers: int = 3,
-        mlp_targets: int = 1,
     ):
         super().__init__()
 
@@ -43,7 +40,6 @@ class MolecularVAE(nn.Module):
         self.encoder_linear = nn.Sequential(
             nn.Linear(80, encoder_hidden_size),
             nn.SELU(),
-            nn.Dropout(p=encoder_dropout),
         )
         self.encoder_mean = nn.Linear(encoder_hidden_size, latent_size)
         self.encoder_logvar = nn.Linear(encoder_hidden_size, latent_size)
@@ -52,7 +48,6 @@ class MolecularVAE(nn.Module):
         self.decoder_linear = nn.Sequential(
             nn.Linear(latent_size, latent_size),
             nn.SELU(),
-            nn.Dropout(p=decoder_dropout),
         )
         self.decoder_gru = nn.GRU(
             latent_size,
@@ -67,11 +62,9 @@ class MolecularVAE(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(self.latent_size, mlp_hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=mlp_dropout),
             nn.Linear(mlp_hidden_size, mlp_hidden_size),
             nn.ReLU(),
-            nn.Dropout(p=mlp_dropout),
-            nn.Linear(mlp_hidden_size, mlp_targets),
+            nn.Linear(mlp_hidden_size, target_size),
         )
 
     def n_parameters(self) -> int:
@@ -99,11 +92,8 @@ class MolecularVAE(nn.Module):
         return xr
 
     def reparameterize(self, z_mean, z_logvar):
-        if self.training:
-            epsilon = torch.randn_like(z_logvar)
-            return z_mean + torch.exp(0.5 * z_logvar) * epsilon
-        else:
-            return z_mean
+        epsilon = torch.randn_like(z_logvar)
+        return z_mean + torch.exp(0.5 * z_logvar) * epsilon
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         z_mean, z_logvar = self.encode(x)
