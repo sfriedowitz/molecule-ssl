@@ -27,6 +27,7 @@ class MolecularVAE(nn.Module):
         super().__init__()
 
         self.latent_size = latent_size
+        self.target_size = target_size
 
         # Encoder layers
         self.encoder_conv = nn.Sequential(

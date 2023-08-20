@@ -8,18 +8,18 @@ class VAELoss(nn.Module):
     def __init__(
         self,
         *,
-        include_mse: bool = True,
+        mse_scale: float = 1.0,
         beta_max: float = 1.0,
-        beta_start: int = 0,
-        beta_end: int = 0,
+        beta_epoch_start: int = 0,
+        beta_epoch_end: int = 0,
     ):
         super().__init__()
-        self.include_mse = include_mse
+        self.mse_scale = mse_scale
 
         # Tracking KL loss contribution
         self.beta_max = beta_max
-        self.beta_start = beta_start
-        self.beta_end = beta_end
+        self.beta_epoch_start = beta_epoch_start
+        self.beta_epoch_end = beta_epoch_end
 
         # Cache values from forward pass for tracking
         self.current_ce: Optional[float] = None
@@ -28,13 +28,13 @@ class VAELoss(nn.Module):
         self.current_accuracy: Optional[int] = None
 
     def get_beta(self, epoch):
-        if epoch < self.beta_start:
+        if epoch < self.beta_epoch_start:
             return 0.0
-        elif epoch >= self.beta_end:
+        elif epoch >= self.beta_epoch_end:
             return self.beta_max
         else:
-            step_size = self.beta_max / max(self.beta_end - self.beta_start, 1)
-            return step_size * (epoch - self.beta_start)
+            step_size = self.beta_max / max(self.beta_epoch_end - self.beta_epoch_start, 1)
+            return step_size * (epoch - self.beta_epoch_start)
 
     def forward(
         self,
@@ -50,16 +50,12 @@ class VAELoss(nn.Module):
         # so transpose tensors so labels in dim=1
         ce = F.cross_entropy(xr.transpose(2, 1), x.transpose(2, 1), reduction="sum")
         kld = -0.5 * torch.sum(1.0 + z_logvar - z_mean.pow(2) - z_logvar.exp())
+        mse = F.mse_loss(y_hat, y, reduction="sum")
         accuracy = (x.argmax(dim=-1) == xr.argmax(dim=-1)).all(dim=-1).sum()
-
-        loss = ce + self.get_beta(epoch) * kld
-        if self.include_mse:
-            mse = F.mse_loss(y_hat, y, reduction="sum")
-            loss += mse
-            self.current_mse = mse.item()
 
         self.current_ce = ce.item()
         self.current_kld = kld.item()
+        self.current_mse = mse.item()
         self.current_accuracy = accuracy.item()
 
-        return loss
+        return ce + self.get_beta(epoch) * kld + self.mse_scale * mse
