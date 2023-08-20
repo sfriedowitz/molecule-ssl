@@ -10,16 +10,17 @@ class VAELoss(nn.Module):
         *,
         mse_scale: float = 1.0,
         beta_max: float = 1.0,
-        beta_epoch_start: int = 0,
-        beta_epoch_end: int = 0,
+        beta_start: int = 0,
+        beta_end: int = 0,
     ):
         super().__init__()
         self.mse_scale = mse_scale
 
         # Tracking KL loss contribution
         self.beta_max = beta_max
-        self.beta_epoch_start = beta_epoch_start
-        self.beta_epoch_end = beta_epoch_end
+        self.beta_start = beta_start
+        self.beta_end = beta_end
+        self._step_count = 0
 
         # Cache values from forward pass for tracking
         self.current_ce: Optional[float] = None
@@ -27,14 +28,17 @@ class VAELoss(nn.Module):
         self.current_mse: Optional[float] = None
         self.current_accuracy: Optional[int] = None
 
-    def get_beta(self, epoch):
-        if epoch < self.beta_epoch_start:
+    def step_beta(self):
+        self._step_count += 1
+
+    def get_beta(self):
+        if self._step_count < self.beta_start:
             return 0.0
-        elif epoch >= self.beta_epoch_end:
+        elif self._step_count >= self.beta_end:
             return self.beta_max
         else:
-            step_size = self.beta_max / max(self.beta_epoch_end - self.beta_epoch_start, 1)
-            return step_size * (epoch - self.beta_epoch_start)
+            step_size = self.beta_max / max(self.beta_end - self.beta_start, 1)
+            return step_size * (self._step_count - self.beta_start)
 
     def forward(
         self,
@@ -44,7 +48,6 @@ class VAELoss(nn.Module):
         y_hat: torch.Tensor,
         z_mean: torch.Tensor,
         z_logvar: torch.Tensor,
-        epoch: int,
     ) -> torch.Tensor:
         # Cross entropy should be computed across one-hot labels,
         # so transpose tensors so labels in dim=1
@@ -58,4 +61,4 @@ class VAELoss(nn.Module):
         self.current_mse = mse.item()
         self.current_accuracy = accuracy.item()
 
-        return ce + self.get_beta(epoch) * kld + self.mse_scale * mse
+        return ce + self.get_beta() * kld + self.mse_scale * mse

@@ -15,8 +15,8 @@ INPUT_CHANNELS = 29
 class MolecularVAE(nn.Module):
     def __init__(
         self,
-        latent_size: int,
         target_size: int,
+        latent_size: int,
         *,
         encoder_hidden_size: int = 400,
         gru_hidden_size: int = 500,

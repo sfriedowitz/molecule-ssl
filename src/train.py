@@ -14,23 +14,24 @@ import mlflow
 from src.loss import VAELoss
 from src.vae import MolecularVAE
 
-EXPERIMENT_NAME = "MolecularVAE"
+MLFLOW_EXPERIMENT_NAME = "MolecularVAE"
+DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 @dataclass
 class TrainingConfig:
-    n_epochs: int
-    latent_size: int
-    target_size: int
+    targets: str
+    epochs: int
+    latent_size: int = 50
     encoder_hidden_size: int = 400
     gru_hidden_size: int = 500
     mlp_hidden_size: int = 300
     gru_layers: int = 3
-    gru_dropout: float = 0.1
+    gru_dropout: float = 0.05
     mse_scale: float = 1.0
     beta_max: float = 1.0
-    beta_epoch_start: int = 0
-    beta_epoch_end: int = 0
+    beta_start: int = 0
+    beta_end: int = 0
     lr_init: float = 2e-3
     lr_gamma: float = 0.5
     lr_milestones: list[int] = field(default_factory=lambda: [])
@@ -38,14 +39,32 @@ class TrainingConfig:
     batch_size: int = 250
 
 
-def load_training_data() -> (Dataset, Dataset):
-    x_train = torch.load(os.path.join("data", "qm9_inputs_train.pt")).float()
-    x_test = torch.load(os.path.join("data", "qm9_inputs_test.pt")).float()
+def load_training_data(config: TrainingConfig) -> (Dataset, Dataset):
+    input_file_train = "qm9_inputs_train.pt"
+    input_file_test = "qm9_inputs_test.pt"
 
-    y_train = torch.load(os.path.join("data", "qm9_descriptors_train.pt")).float()
-    y_test = torch.load(os.path.join("data", "qm9_descriptors_test.pt")).float()
+    if config.targets == "descriptors":
+        target_file_train = "qm9_descriptors_train.pt"
+        target_file_test = "qm9_descriptors_test.pt"
+    elif config.targets == "logp":
+        target_file_train = "qm9_logp_train.pt"
+        target_file_test = "qm9_logp_test.pt"
+    elif config.targets == "gap":
+        target_file_train = "qm9_gap_train.pt"
+        target_file_test = "qm9_gap_test.pt"
+    else:
+        raise ValueError("Targets must be one of {'descriptors', 'logp', 'gap'}")
 
-    return x_train, x_test, y_train, y_test
+    x_train = torch.load(os.path.join("data", input_file_train)).float().to(DEVICE)
+    x_test = torch.load(os.path.join("data", input_file_test)).float().to(DEVICE)
+
+    y_train = torch.load(os.path.join("data", target_file_train)).float().to(DEVICE)
+    y_test = torch.load(os.path.join("data", target_file_test)).float().to(DEVICE)
+
+    train_dataset = TensorDataset(x_train, y_train)
+    test_dataset = TensorDataset(x_test, y_test)
+
+    return train_dataset, test_dataset
 
 
 def train_one_epoch(
@@ -54,14 +73,13 @@ def train_one_epoch(
     optimizer: Optimizer,
     scheduler: Optional[LRScheduler],
     data_loader: DataLoader,
-    epoch: int,
 ):
     model.train()
     metrics = defaultdict(lambda: 0.0)
     for x, y in data_loader:
         x_recon, y_hat, z_mean, z_logvar = model(x)
 
-        loss = criterion(x, x_recon, y, y_hat, z_mean, z_logvar, epoch)
+        loss = criterion(x, x_recon, y, y_hat, z_mean, z_logvar)
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -80,12 +98,12 @@ def train_one_epoch(
 
 
 @torch.no_grad()
-def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoader, epoch: int):
+def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoader):
     model.eval()
     metrics = defaultdict(lambda: 0.0)
     for x, y in data_loader:
         x_recon, y_hat, z_mean, z_logvar = model(x)
-        loss = criterion(x, x_recon, y, y_hat, z_mean, z_logvar, epoch)
+        loss = criterion(x, x_recon, y, y_hat, z_mean, z_logvar)
 
         metrics["loss"] += loss.item()
         metrics["ce"] += criterion.current_ce
@@ -98,59 +116,57 @@ def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoa
 
 
 def train_model(config: TrainingConfig, *, run_name: Optional[str] = None):
+    logger.info(f"Using device {DEVICE}")
+
+    train_dataset, test_dataset = load_training_data(config)
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=True)
+
+    # Configure model and optimizer
+    n_targets = train_dataset[0][1].shape[-1]
+    model = MolecularVAE(
+        target_size=n_targets,
+        latent_size=config.latent_size,
+        encoder_hidden_size=config.encoder_hidden_size,
+        gru_hidden_size=config.gru_hidden_size,
+        mlp_hidden_size=config.mlp_hidden_size,
+        gru_layers=config.gru_layers,
+        gru_dropout=config.gru_dropout,
+    )
+    model = model.to(DEVICE)
+    logger.info(f"Initialized model with {model.n_parameters()} parameters")
+
+    optimizer = Adam(model.parameters(), lr=config.lr_init, weight_decay=config.weight_decay)
+    scheduler = MultiStepLR(optimizer, gamma=config.lr_gamma, milestones=config.lr_milestones)
+    criterion = VAELoss(
+        mse_scale=config.mse_scale,
+        beta_max=config.beta_max,
+        beta_start=config.beta_start,
+        beta_end=config.beta_end,
+    )
+
     # Specify tracking server
     mlflow.set_tracking_uri("http://localhost:5000")
-    mlflow.set_experiment(experiment_name=EXPERIMENT_NAME)
+    mlflow.set_experiment(experiment_name=MLFLOW_EXPERIMENT_NAME)
 
     with mlflow.start_run(run_name=run_name):
         for field in dataclasses.fields(config):
             mlflow.log_param(field.name, getattr(config, field.name))
 
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Using device {device}")
-
-        x_train, x_test, y_train, y_test = (x.to(device) for x in load_training_data())
-        train_dataset = TensorDataset(x_train, y_train)
-        test_dataset = TensorDataset(x_test, y_test)
-        train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
-        test_loader = DataLoader(test_dataset, batch_size=config.batch_size, shuffle=True)
-
-        # Configure model and parameters
-        model = MolecularVAE(
-            latent_size=config.latent_size,
-            target_size=config.target_size,
-            encoder_hidden_size=config.encoder_hidden_size,
-            gru_hidden_size=config.gru_hidden_size,
-            mlp_hidden_size=config.mlp_hidden_size,
-            gru_layers=config.gru_layers,
-            gru_dropout=config.gru_dropout,
-        )
-        model = model.to(device)
-        logger.info(f"Initialized model with {model.n_parameters()} parameters")
-
-        optimizer = Adam(model.parameters(), lr=config.lr_init, weight_decay=config.weight_decay)
-        scheduler = MultiStepLR(optimizer, gamma=config.lr_gamma, milestones=config.lr_milestones)
-        criterion = VAELoss(
-            mse_scale=config.mse_scale,
-            beta_max=config.beta_max,
-            beta_epoch_start=config.beta_epoch_start,
-            beta_epoch_end=config.beta_epoch_end,
-        )
-
-        for epoch in range(1, config.n_epochs + 1):
-            train_metrics = train_one_epoch(
-                model, criterion, optimizer, scheduler, train_loader, epoch
-            )
+        for epoch in range(config.epochs):
+            train_metrics = train_one_epoch(model, criterion, optimizer, scheduler, train_loader)
             for metric, value in train_metrics.items():
                 key = f"train_{metric}"
                 mlflow.log_metric(key, value, step=epoch)
 
-            test_metrics = test_one_epoch(model, criterion, test_loader, epoch)
+            test_metrics = test_one_epoch(model, criterion, test_loader)
             for metric, value in test_metrics.items():
                 key = f"test_{metric}"
                 mlflow.log_metric(key, value, step=epoch)
 
-            mlflow.log_metric("kld_beta", criterion.get_beta(epoch), step=epoch)
+            # Log KL weight and then step after batch is complete
+            mlflow.log_metric("kld_beta", criterion.get_beta(), step=epoch)
+            criterion.step_beta()
 
             logger.info(
                 f"Epoch {epoch} | "
