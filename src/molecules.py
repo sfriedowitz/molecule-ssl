@@ -3,12 +3,12 @@ from rdkit.Contrib.SA_Score import sascorer
 from deepchem.feat.molecule_featurizers import RDKitDescriptors
 
 
-def rdkit_descriptors(smiles, *, descriptors=None, use_fragment=False):
+def get_rdkit_descriptors(smiles, *, names=None, use_fragment=False):
     featurizer = RDKitDescriptors(use_fragment=use_fragment)
-    if descriptors is not None:
-        filtered_list = [(name, fx) for name, fx in Descriptors.descList if name in descriptors]
+    if names is not None:
+        filtered_list = [(name, fx) for name, fx in Descriptors.descList if name in names]
         featurizer.descList = filtered_list
-        featurizer.descriptors = descriptors
+        featurizer.descriptors = names
     return featurizer.featurize(smiles)
 
 

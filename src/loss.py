@@ -5,15 +5,8 @@ import torch.nn.functional as F
 
 
 class VAELoss(nn.Module):
-    def __init__(
-        self,
-        *,
-        ce_scale: float = 1.0,
-        kld_scale: float = 1.0,
-        mse_scale: float = 1.0,
-    ):
+    def __init__(self, *, kld_scale: float = 1.0, mse_scale: float = 1.0):
         super().__init__()
-        self.ce_scale = ce_scale
         self.kld_scale = kld_scale
         self.mse_scale = mse_scale
 
@@ -44,4 +37,4 @@ class VAELoss(nn.Module):
         self.current_mse = mse.item()
         self.current_recon = recon.item()
 
-        return self.ce_scale * ce + self.kld_scale * kld + self.mse_scale * mse
+        return ce + self.kld_scale * kld + self.mse_scale * mse

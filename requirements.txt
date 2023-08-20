@@ -13,3 +13,4 @@ jupyter
 matplotlib
 seaborn
 black
+loguru
