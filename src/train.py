@@ -32,11 +32,11 @@ class TrainingConfig:
     beta_max: float = 1.0
     beta_start: int = 0
     beta_end: int = 0
+    batch_size: int = 250
+    weight_decay: float = 1e-5
     lr_init: float = 2e-3
     lr_gamma: float = 0.5
     lr_milestones: list[int] = field(default_factory=lambda: [])
-    weight_decay: float = 1e-5
-    batch_size: int = 250
 
 
 def load_training_data(config: TrainingConfig) -> (Dataset, Dataset):
@@ -46,14 +46,14 @@ def load_training_data(config: TrainingConfig) -> (Dataset, Dataset):
     if config.targets == "descriptors":
         target_file_train = "qm9_descriptors_train.pt"
         target_file_test = "qm9_descriptors_test.pt"
+    elif config.targets == "properties":
+        target_file_train = "qm9_properties_train.pt"
+        target_file_test = "qm9_properties_test.pt"
     elif config.targets == "logp":
         target_file_train = "qm9_logp_train.pt"
         target_file_test = "qm9_logp_test.pt"
-    elif config.targets == "gap":
-        target_file_train = "qm9_gap_train.pt"
-        target_file_test = "qm9_gap_test.pt"
     else:
-        raise ValueError("Targets must be one of {'descriptors', 'logp', 'gap'}")
+        raise ValueError("Targets must be one of {'descriptors', 'properties', 'logp'}")
 
     x_train = torch.load(os.path.join("data", input_file_train)).float().to(DEVICE)
     x_test = torch.load(os.path.join("data", input_file_test)).float().to(DEVICE)
@@ -65,6 +65,10 @@ def load_training_data(config: TrainingConfig) -> (Dataset, Dataset):
     test_dataset = TensorDataset(x_test, y_test)
 
     return train_dataset, test_dataset
+
+
+def count_reconstructions(x: torch.Tensor, x_recon: torch.Tensor):
+    return (x.argmax(dim=-1) == x_recon.argmax(dim=-1)).all(dim=-1).sum()
 
 
 def train_one_epoch(
@@ -88,7 +92,7 @@ def train_one_epoch(
         metrics["ce"] += criterion.current_ce
         metrics["kld"] += criterion.current_kld
         metrics["mse"] += criterion.current_mse
-        metrics["accuracy"] += criterion.current_accuracy
+        metrics["accuracy"] += count_reconstructions(x, x_recon)
 
     if scheduler is not None:
         scheduler.step()
@@ -109,7 +113,7 @@ def test_one_epoch(model: MolecularVAE, criterion: VAELoss, data_loader: DataLoa
         metrics["ce"] += criterion.current_ce
         metrics["kld"] += criterion.current_kld
         metrics["mse"] += criterion.current_mse
-        metrics["accuracy"] += criterion.current_accuracy
+        metrics["accuracy"] += count_reconstructions(x, x_recon)
 
     n = len(data_loader.dataset)
     return {k: v / n for k, v in metrics.items()}
@@ -153,7 +157,7 @@ def train_model(config: TrainingConfig, *, run_name: Optional[str] = None):
         for field in dataclasses.fields(config):
             mlflow.log_param(field.name, getattr(config, field.name))
 
-        for epoch in range(config.epochs):
+        for epoch in range(1, config.epochs + 1):
             train_metrics = train_one_epoch(model, criterion, optimizer, scheduler, train_loader)
             for metric, value in train_metrics.items():
                 key = f"train_{metric}"

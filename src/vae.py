@@ -20,9 +20,9 @@ class MolecularVAE(nn.Module):
         *,
         encoder_hidden_size: int = 400,
         gru_hidden_size: int = 500,
-        mlp_hidden_size: int = 300,
         gru_dropout: float = 0.0,
         gru_layers: int = 3,
+        mlp_hidden_size: int = 300
     ):
         super().__init__()
 
