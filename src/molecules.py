@@ -1,5 +1,3 @@
-import selfies as sf
-from rdkit import Chem
 from rdkit.Chem import Descriptors
 from rdkit.Contrib.SA_Score import sascorer
 from deepchem.feat.molecule_featurizers import RDKitDescriptors

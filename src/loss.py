@@ -5,6 +5,8 @@ import torch.nn.functional as F
 
 
 class VAELoss(nn.Module):
+    """Joint loss for VAE reconstruction, KL divergence, and regression."""
+
     def __init__(
         self,
         *,
