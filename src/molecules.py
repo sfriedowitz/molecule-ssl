@@ -1,5 +1,7 @@
+import numpy as np
 from rdkit.Chem import Descriptors
 from rdkit.Contrib.SA_Score import sascorer
+from rdkit.Contrib.NP_Score import npscorer
 from deepchem.feat.molecule_featurizers import RDKitDescriptors
 
 
@@ -10,6 +12,11 @@ def get_rdkit_descriptors(mols, *, names=None):
         featurizer.descList = filtered_list
         featurizer.descriptors = names
     return featurizer.featurize(mols)
+
+
+def get_np_scores(mols):
+    fscore = npscorer.readNPModel()
+    return [npscorer.scoreMol(mol, fscore) for mol in mols]
 
 
 def largest_ring_size(mol):
