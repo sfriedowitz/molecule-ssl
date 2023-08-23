@@ -43,17 +43,8 @@ def load_training_data(config: TrainingConfig) -> (Dataset, Dataset):
     input_file_train = "qm9_inputs_train.pt"
     input_file_test = "qm9_inputs_test.pt"
 
-    if config.targets == "descriptors":
-        target_file_train = "qm9_descriptors_train.pt"
-        target_file_test = "qm9_descriptors_test.pt"
-    elif config.targets == "properties":
-        target_file_train = "qm9_properties_train.pt"
-        target_file_test = "qm9_properties_test.pt"
-    elif config.targets == "logp":
-        target_file_train = "qm9_logp_train.pt"
-        target_file_test = "qm9_logp_test.pt"
-    else:
-        raise ValueError("Targets must be one of {'descriptors', 'properties', 'logp'}")
+    target_file_train = f"qm9_{config.targets}_train.pt"
+    target_file_test = f"qm9_{config.targets}_test.pt"
 
     x_train = torch.load(os.path.join("data", input_file_train)).float().to(DEVICE)
     x_test = torch.load(os.path.join("data", input_file_test)).float().to(DEVICE)
@@ -180,5 +171,5 @@ def train_model(config: TrainingConfig, *, run_name: Optional[str] = None):
             )
 
         # Log final model
-        model_info = mlflow.pytorch.log_model(model, "model")
+        model_info = mlflow.pytorch.log_model(model.eval().cpu(), "model")
         logger.info(f"Logged trained model at {model_info.model_uri}")

@@ -3,13 +3,13 @@ from rdkit.Contrib.SA_Score import sascorer
 from deepchem.feat.molecule_featurizers import RDKitDescriptors
 
 
-def get_rdkit_descriptors(smiles, *, names=None):
+def get_rdkit_descriptors(mols, *, names=None):
     featurizer = RDKitDescriptors()
     if names is not None:
         filtered_list = [(name, fx) for name, fx in Descriptors.descList if name in names]
         featurizer.descList = filtered_list
         featurizer.descriptors = names
-    return featurizer.featurize(smiles)
+    return featurizer.featurize(mols)
 
 
 def largest_ring_size(mol):
