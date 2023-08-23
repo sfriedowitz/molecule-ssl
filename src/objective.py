@@ -1,11 +1,11 @@
 from typing import Optional
 import selfies as sf
-from rdkit.Chem import Chem
+from rdkit import Chem
 
 import torch
 from botorch.test_functions.base import BaseTestProblem
 
-from src.molecules import penalized_logp
+from src import molecules
 from src.vae import MolecularVAE
 from src.selfies import SelfiesEncoder
 
@@ -30,5 +30,11 @@ class PenalizedLogP(BaseTestProblem):
         decodings = self.vae.decode(X)
         selfies = [self.selfies_encoder.decode_tensor(x) for x in decodings]
         mols = [Chem.MolFromSmiles(sf.decoder(s)) for s in selfies]
-        logp_values = [penalized_logp(m) for m in mols]
-        return torch.tensor(logp_values)
+        logps = []
+        for mol in mols:
+            if mol.GetNumAtoms() == 0:
+                obj = float("-inf")
+            else:
+                obj = molecules.penalized_logp(mol)
+            logps.append(obj)
+        return torch.tensor(logps).unsqueeze(-1)

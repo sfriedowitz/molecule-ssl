@@ -13,10 +13,10 @@ def get_fitted_gp(
     bounds: torch.Tensor,
     state_dict: Optional[dict[str, torch.Tensor]] = None,
 ):
+    x_train = normalize(x_train, bounds)
+    y_train = y_train.view(y_train.shape[0], -1)
     model = SingleTaskGP(
-        train_X=normalize(x_train, bounds),
-        train_Y=y_train,
-        outcome_transform=Standardize(m=y_train.shape[-1]),
+        train_X=x_train, train_Y=y_train, outcome_transform=Standardize(m=y_train.shape[-1])
     )
     if state_dict is not None:
         model.load_state_dict(state_dict)
