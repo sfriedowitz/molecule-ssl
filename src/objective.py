@@ -1,39 +1,34 @@
 from typing import Optional
+import selfies as sf
+from rdkit.Chem import Chem
 
 import torch
 from botorch.test_functions.base import BaseTestProblem
 
-
-def free_energy(x: torch.Tensor, sizes: torch.Tensor, chi: torch.Tensor) -> torch.Tensor:
-    f_ideal = torch.sum((x / sizes) * torch.log(x + 1e-16), dim=-1)
-    f_int = 0.5 * torch.sum((x @ chi) * x, dim=-1)
-    return f_ideal + f_int
+from src.molecules import penalized_logp
+from src.vae import MolecularVAE
+from src.selfies import SelfiesEncoder
 
 
-class FloryHuggins(BaseTestProblem):
-    """A Flory-Huggins free energy model with an additional cubic self-interaction term."""
+class PenalizedLogP(BaseTestProblem):
+    """Evaluation of the penalized-LogP metric for a single molecule in latent space."""
 
-    def __init__(self, n_components: int, noise: Optional[float] = None):
-        self.dim = n_components
-        self._bounds = [(0.0, 1.0) for _ in range(self.dim)]
+    def __init__(
+        self,
+        vae: MolecularVAE,
+        selfies_encoder: SelfiesEncoder,
+        noise: Optional[float] = None,
+    ):
+        self.dim = vae.latent_size
+        self._bounds = [(-10, 10) for _ in range(self.dim)]
         super().__init__(noise)
 
-        self.sizes = torch.ones(self.dim)
-        self.pairwise = torch.zeros(self.dim, self.dim)
-        self.cubic = torch.zeros(self.dim)
-
-    def set_size(self, i: int, size: float) -> None:
-        self.sizes[i] = size
-
-    def set_pairwise(self, i: int, j: int, coef: float) -> None:
-        self.pairwise[i, j] = coef
-        self.pairwise[j, i] = coef
-
-    def set_cubic(self, i: int, coef: float) -> None:
-        self.cubic[i] = coef
+        self.vae = vae
+        self.selfies_encoder = selfies_encoder
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
-        entropy = torch.sum((X / self.sizes) * torch.log(X + 1e-16), dim=-1)
-        pairwise = 0.5 * torch.sum((X @ self.pairwise) * X, dim=-1)
-        cubic = torch.sum(self.cubic * X**3, dim=-1)
-        return entropy + pairwise + cubic
+        decodings = self.vae.decode(X)
+        selfies = [self.selfies_encoder.decode_tensor(x) for x in decodings]
+        mols = [Chem.MolFromSmiles(sf.decoder(s)) for s in selfies]
+        logp_values = [penalized_logp(m) for m in mols]
+        return torch.tensor(logp_values)

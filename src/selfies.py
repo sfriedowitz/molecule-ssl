@@ -4,7 +4,7 @@ import torch
 
 
 class SelfiesEncoder:
-    def __init__(self, alphabet, pad_to_len):
+    def __init__(self, alphabet: list[str], pad_to_len: int):
         self.alphabet = alphabet
         self.pad_to_len = pad_to_len
         self.symbol_to_idx = {s: i for i, s in enumerate(alphabet)}
