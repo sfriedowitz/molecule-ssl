@@ -17,10 +17,11 @@ class PenalizedLogP(BaseTestProblem):
         self,
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
+        bounds: torch.Tensor,
         noise: Optional[float] = None,
     ):
         self.dim = vae.latent_size
-        self._bounds = [(-10, 10) for _ in range(self.dim)]
+        self._bounds = [(x[0].item(), x[1].item()) for x in bounds.T]
         super().__init__(noise)
 
         self.vae = vae
@@ -30,11 +31,10 @@ class PenalizedLogP(BaseTestProblem):
         decodings = self.vae.decode(X)
         selfies = [self.selfies_encoder.decode_tensor(x) for x in decodings]
         mols = [Chem.MolFromSmiles(sf.decoder(s)) for s in selfies]
-        logps = []
-        for mol in mols:
-            if mol.GetNumAtoms() == 0:
-                obj = float("-inf")
+        scores = []
+        for m in mols:
+            if m.GetNumAtoms() > 0:
+                scores.append(molecules.penalized_logp(m))
             else:
-                obj = molecules.penalized_logp(mol)
-            logps.append(obj)
-        return torch.tensor(logps).unsqueeze(-1)
+                scores.append(float("-inf"))
+        return torch.tensor(scores).unsqueeze(-1)

@@ -1,8 +1,9 @@
-import numpy as np
 from rdkit.Chem import Descriptors
 from rdkit.Contrib.SA_Score import sascorer
 from rdkit.Contrib.NP_Score import npscorer
 from deepchem.feat.molecule_featurizers import RDKitDescriptors
+
+NP_FSCORE = npscorer.readNPModel()
 
 
 def get_rdkit_descriptors(mols, *, names=None):
@@ -12,11 +13,6 @@ def get_rdkit_descriptors(mols, *, names=None):
         featurizer.descList = filtered_list
         featurizer.descriptors = names
     return featurizer.featurize(mols)
-
-
-def get_np_scores(mols):
-    fscore = npscorer.readNPModel()
-    return [npscorer.scoreMol(mol, fscore) for mol in mols]
 
 
 def largest_ring_size(mol):
@@ -49,3 +45,11 @@ def penalized_qed(mol):
     qed = Descriptors.qed(mol)
     sas = sascorer.calculateScore(mol)
     return 5.0 * qed - sas
+
+
+def penalized_np(mol):
+    """Calculates the NP score of a molecule, penalized by its SAS.
+
+    Inspired by the penalized QED metric above.
+    """
+    return 5.0 * npscorer.scoreMol(mol, NP_FSCORE) - sascorer.calculateScore(mol)

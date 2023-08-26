@@ -7,7 +7,7 @@ from botorch.models.transforms import Standardize
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 
-def get_fitted_gp(
+def get_fitted_model(
     x_train: torch.Tensor,
     y_train: torch.Tensor,
     bounds: torch.Tensor,
