@@ -1,4 +1,5 @@
-from typing import Optional
+import math
+from typing import Any, Callable, Optional
 import selfies as sf
 from rdkit import Chem
 
@@ -10,11 +11,12 @@ from src.vae import MolecularVAE
 from src.selfies import SelfiesEncoder
 
 
-class PenalizedLogP(BaseTestProblem):
-    """Evaluation of the penalized-LogP metric for a single molecule in latent space."""
+class SingleMoleculeProblem(BaseTestProblem):
+    __min_objective_value = -100.0
 
     def __init__(
         self,
+        objective: Callable[[Any], float],
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
         bounds: torch.Tensor,
@@ -26,15 +28,45 @@ class PenalizedLogP(BaseTestProblem):
 
         self.vae = vae
         self.selfies_encoder = selfies_encoder
+        self.objective = objective
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
         decodings = self.vae.decode(X)
         selfies = [self.selfies_encoder.decode_tensor(x) for x in decodings]
-        mols = [Chem.MolFromSmiles(sf.decoder(s)) for s in selfies]
-        scores = []
-        for m in mols:
-            if m.GetNumAtoms() > 0:
-                scores.append(molecules.penalized_logp(m))
-            else:
-                scores.append(float("-inf"))
-        return torch.tensor(scores).unsqueeze(-1)
+        objective_values = []
+        for s in selfies:
+            try:
+                mol = Chem.MolFromSmiles(sf.decoder(s))
+                obj = self.objective(mol)
+                if math.isnan(obj):
+                    obj = self.__min_objective_value
+            except:
+                obj = self.__min_objective_value
+            objective_values.append(obj)
+        return torch.tensor(objective_values).unsqueeze(-1)
+
+
+class PenalizedLogP(SingleMoleculeProblem):
+    """Evaluation of the penalized-LogP metric for a single molecule in latent space."""
+
+    def __init__(
+        self,
+        vae: MolecularVAE,
+        selfies_encoder: SelfiesEncoder,
+        bounds: torch.Tensor,
+        noise: Optional[float] = None,
+    ):
+        super().__init__(molecules.penalized_logp, vae, selfies_encoder, bounds, noise)
+
+
+class PenalizedNP(SingleMoleculeProblem):
+    """Evaluation of the penalized-LogP metric for a single molecule in latent space."""
+
+    def __init__(
+        self,
+        vae: MolecularVAE,
+        selfies_encoder: SelfiesEncoder,
+        bounds: torch.Tensor,
+        noise: Optional[float] = None,
+    ):
+        super().__init__(molecules.penalized_np, vae, selfies_encoder, bounds, noise)
