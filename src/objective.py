@@ -53,6 +53,7 @@ class PenalizedLogP(SingleMoleculeProblem):
         self,
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
+        *,
         bounds: torch.Tensor,
         noise: Optional[float] = None,
     ):
@@ -66,7 +67,30 @@ class PenalizedNP(SingleMoleculeProblem):
         self,
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
+        *,
         bounds: torch.Tensor,
         noise: Optional[float] = None,
     ):
         super().__init__(molecules.penalized_np, vae, selfies_encoder, bounds, noise)
+
+
+class MoleculeInMixture(BaseTestProblem):
+    def __init__(
+        self,
+        vae: MolecularVAE,
+        selfies_encoder: SelfiesEncoder,
+        *,
+        n_components: int,
+        bounds: torch.Tensor,
+        noise: Optional[float] = None,
+    ):
+        self.n_components = n_components
+        self.vae = vae
+        self.selfies_encoder = selfies_encoder
+
+        self.dim = vae.latent_size + n_components
+        self._bounds = [(x[0].item(), x[1].item()) for x in bounds.T]
+        super().__init__(noise)
+
+    def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
+        pass
