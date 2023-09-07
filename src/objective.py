@@ -4,6 +4,7 @@ import selfies as sf
 from rdkit import Chem
 
 import torch
+import torch.nn.functional as F
 from botorch.test_functions.base import BaseTestProblem
 
 from src import molecules
@@ -19,11 +20,11 @@ class SingleMoleculeProblem(BaseTestProblem):
         objective: Callable[[Any], float],
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
-        bounds: torch.Tensor,
+        domain_size: torch.Tensor,
         noise: Optional[float] = None,
     ):
         self.dim = vae.latent_size
-        self._bounds = [(x[0].item(), x[1].item()) for x in bounds.T]
+        self._bounds = [(-domain_size, domain_size) for _ in range(self.dim)]
         super().__init__(noise)
 
         self.vae = vae
@@ -54,10 +55,10 @@ class PenalizedLogP(SingleMoleculeProblem):
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
         *,
-        bounds: torch.Tensor,
+        domain_size: float = 5.0,
         noise: Optional[float] = None,
     ):
-        super().__init__(molecules.penalized_logp, vae, selfies_encoder, bounds, noise)
+        super().__init__(molecules.penalized_logp, vae, selfies_encoder, domain_size, noise)
 
 
 class PenalizedNP(SingleMoleculeProblem):
@@ -68,29 +69,54 @@ class PenalizedNP(SingleMoleculeProblem):
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
         *,
-        bounds: torch.Tensor,
+        domain_size: float = 5.0,
         noise: Optional[float] = None,
     ):
-        super().__init__(molecules.penalized_np, vae, selfies_encoder, bounds, noise)
+        super().__init__(molecules.penalized_np, vae, selfies_encoder, domain_size, noise)
 
 
-class MoleculeInMixture(BaseTestProblem):
+class WaterOctanolMixture(BaseTestProblem):
+    __min_objective_value = -100.0
+
     def __init__(
         self,
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
         *,
-        n_components: int,
-        bounds: torch.Tensor,
+        domain_size: float = 5.0,
+        composition_scale: float = 10.0,
         noise: Optional[float] = None,
     ):
-        self.n_components = n_components
-        self.vae = vae
-        self.selfies_encoder = selfies_encoder
-
-        self.dim = vae.latent_size + n_components
-        self._bounds = [(x[0].item(), x[1].item()) for x in bounds.T]
+        self.dim = vae.latent_size + 3
+        self._bounds = [(-domain_size, domain_size) for _ in range(self.dim)]
         super().__init__(noise)
 
+        self.vae = vae
+        self.selfies_encoder = selfies_encoder
+        self.composition_scale = composition_scale
+
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
-        pass
+        objective_values = []
+        for xi in X:
+            x_comp = xi[:3]
+            x_comp = F.softmax(x_comp).tolist()
+            x_water, x_octanol, x_mol = x_comp
+
+            z_latent = xi[3:]
+            x_recon = self.vae.decode(z_latent.view(1, -1))
+            selfie = self.selfies_encoder.decode_tensor(x_recon[0])
+            try:
+                mol = Chem.MolFromSmiles(sf.decoder(selfie))
+                logp = Chem.Crippen.MolLogP(mol)
+                if math.isnan(logp):
+                    objective = self.__min_objective_value
+                else:
+                    if x_water > x_octanol:
+                        # Water > octanol, prefer low logP for partition into water
+                        pass
+            except:
+                objective = self.__min_objective_value
+
+            objective_values.append(objective)
+
+        return torch.tensor(objective_values).unsqueeze(-1)
