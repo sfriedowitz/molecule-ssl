@@ -2,6 +2,7 @@ import math
 from typing import Any, Callable, Optional
 import selfies as sf
 from rdkit import Chem
+from rdkit.Contrib.SA_Score import sascorer
 
 import torch
 import torch.nn.functional as F
@@ -84,8 +85,7 @@ class WaterOctanolMixture(BaseTestProblem):
         selfies_encoder: SelfiesEncoder,
         *,
         domain_size: float = 5.0,
-        composition_scale: float = 1e3,
-        partition_scale: float = 10.0,
+        sas_scale: float = 0.0,
         noise: Optional[float] = None,
     ):
         self.dim = vae.latent_size + 3
@@ -94,8 +94,7 @@ class WaterOctanolMixture(BaseTestProblem):
 
         self.vae = vae
         self.selfies_encoder = selfies_encoder
-        self.composition_scale = composition_scale
-        self.partition_scale = partition_scale
+        self.sas_scale = sas_scale
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
         objective_values = []
@@ -110,21 +109,18 @@ class WaterOctanolMixture(BaseTestProblem):
             try:
                 mol = Chem.MolFromSmiles(sf.decoder(selfie))
                 logp = Chem.Crippen.MolLogP(mol)
-                if math.isnan(logp):
+                sas = sascorer.calculateScore(mol)
+                if math.isnan(logp) or math.isnan(sas):
                     raise ValueError("Unable to compute objective for molecule")
 
                 K = 10**logp
                 if x_water > x_octanol:
                     # Water > octanol, prefer low logP for partition into water phase
-                    f_oct = -self.composition_scale * (x_octanol - 0.1) ** 2
-                    f_mol = -self.composition_scale * (x_mol - 0.05) ** 2
-                    f_part = self.partition_scale * x_mol * x_water * (1 / K)
+                    f_comp = max(x_water - 0.5, 0.0) * x_mol * (1 / K)
                 else:
                     # Octanol > water, prefer high logP for partition into octanol phase
-                    f_oct = -self.composition_scale * (x_octanol - 0.9) ** 2
-                    f_mol = -self.composition_scale * (x_mol - 0.05) ** 2
-                    f_part = self.partition_scale * x_mol * x_water * K
-                objective = f_oct + f_mol + f_part
+                    f_comp = max(x_octanol - 0.5, 0.0) * x_mol * K
+                objective = f_comp - self.sas_scale * sas
             except:
                 objective = self.__min_objective_value
 
