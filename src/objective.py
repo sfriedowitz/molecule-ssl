@@ -40,7 +40,7 @@ class SingleMoleculeProblem(BaseTestProblem):
                 mol = Chem.MolFromSmiles(sf.decoder(s))
                 obj = self.objective(mol)
                 if math.isnan(obj):
-                    obj = self.__min_objective_value
+                    raise ValueError("Unable to compute objective for molecule")
             except:
                 obj = self.__min_objective_value
             objective_values.append(obj)
@@ -84,7 +84,8 @@ class WaterOctanolMixture(BaseTestProblem):
         selfies_encoder: SelfiesEncoder,
         *,
         domain_size: float = 5.0,
-        composition_scale: float = 10.0,
+        composition_scale: float = 1e3,
+        partition_scale: float = 10.0,
         noise: Optional[float] = None,
     ):
         self.dim = vae.latent_size + 3
@@ -94,6 +95,7 @@ class WaterOctanolMixture(BaseTestProblem):
         self.vae = vae
         self.selfies_encoder = selfies_encoder
         self.composition_scale = composition_scale
+        self.partition_scale = partition_scale
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
         objective_values = []
@@ -109,11 +111,22 @@ class WaterOctanolMixture(BaseTestProblem):
                 mol = Chem.MolFromSmiles(sf.decoder(selfie))
                 logp = Chem.Crippen.MolLogP(mol)
                 if math.isnan(logp):
-                    objective = self.__min_objective_value
+                    raise ValueError("Unable to compute objective for molecule")
+
+                K = 10**logp
+                if x_water > x_octanol:
+                    # Water > octanol, prefer low logP for partition into water phase
+                    f_oct = -self.composition_scale * (x_octanol - 0.1) ** 2
+                    f_mol = -self.composition_scale * (x_mol - 0.05) ** 2
+                    f_part = self.partition_scale * x_mol * x_water * (1 / K)
                 else:
-                    if x_water > x_octanol:
-                        # Water > octanol, prefer low logP for partition into water
-                        pass
+                    # Octanol > water, prefer high logP for partition into octanol phase
+                    f_oct = -self.composition_scale * (x_octanol - 0.9) ** 2
+                    f_mol = -self.composition_scale * (x_mol - 0.05) ** 2
+                    f_part = self.partition_scale * x_mol * x_water * K
+
+                objective = f_oct + f_mol + f_part
+                print((x_water, x_octanol, x_mol), (f_oct, f_mol, f_part))
             except:
                 objective = self.__min_objective_value
 

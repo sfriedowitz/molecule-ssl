@@ -1,11 +1,12 @@
 import torch
-import numpy as np
-import scipy
+from rdkit import Chem
+import selfies as sf
 
 
-def uniform_simplex(size, *, dim: int) -> torch.Tensor:
-    x = scipy.stats.dirichlet.rvs(size=size, alpha=np.ones(dim))
-    return torch.from_numpy(x).float()
+def z_to_mol(z, vae, selfies_encoder):
+    x = vae.decode(z.unsqueeze(0))[0]
+    s = selfies_encoder.decode_tensor(x)
+    return Chem.MolFromSmiles(sf.decoder(s))
 
 
 def slerp(start: torch.Tensor, end: torch.Tensor, t: float):
