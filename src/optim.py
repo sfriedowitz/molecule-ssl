@@ -11,7 +11,22 @@ from botorch.test_functions.base import BaseTestProblem
 from gpytorch.mlls import ExactMarginalLogLikelihood
 
 
-def generate_initial_data(n: int, problem: BaseTestProblem, gen=None):
+class CandidateGeneration:
+    def __init__(self, x: torch.Tensor, y: torch.Tensor):
+        self.x = x.clone()
+        self.y = y.clone()
+        self._best_idx = self.y.argmax()
+
+    @property
+    def best_x(self):
+        return self.x[self._best_idx]
+
+    @property
+    def best_y(self):
+        return self.y[self._best_idx]
+
+
+def generate_initial_data(n: int, problem: BaseTestProblem, *, gen=None):
     z = torch.randn(n, problem.dim, generator=gen)
     y = problem(z)
     return z, y
@@ -41,9 +56,7 @@ def get_fitted_model(
 def optimize_and_evaluate(acqf, problem, *, batch_size=5, num_restarts=10, raw_samples=100):
     candidates, _ = optimize_acqf(
         acq_function=acqf,
-        bounds=torch.stack(
-            [torch.zeros(problem.vae.latent_size), torch.ones(problem.vae.latent_size)]
-        ),
+        bounds=torch.stack([torch.zeros(problem.dim), torch.ones(problem.dim)]),
         q=batch_size,
         num_restarts=num_restarts,
         raw_samples=raw_samples,
@@ -55,21 +68,22 @@ def optimize_and_evaluate(acqf, problem, *, batch_size=5, num_restarts=10, raw_s
     return new_z[finite_obj], new_obj[finite_obj]
 
 
-def optimize_sequential(problem, *, n_epoch, n_init, batch_size, seed=None):
+def optimize_sequential(
+    problem: BaseTestProblem,
+    *,
+    n_epochs: int,
+    n_init: int,
+    batch_size: int,
+    seed: Optional[int] = None,
+    print_every: Optional[int] = None,
+) -> list[CandidateGeneration]:
     if seed is not None:
         torch.manual_seed(seed)
 
-    train_x, train_obj = generate_initial_data(n_init, problem)
-
-    best_x = []
-    best_obj = []
-
-    best_idx = train_obj.argmax()
-    best_x.append(train_x[best_idx])
-    best_obj.append(train_obj[best_idx].item())
-
     state_dict = None
-    for _ in range(n_epoch):
+    train_x, train_obj = generate_initial_data(n_init, problem)
+    generations = [CandidateGeneration(train_x, train_obj)]
+    for epoch in range(1, n_epochs + 1):
         # get objective
         gp = get_fitted_model(train_x, train_obj, problem.bounds, state_dict=state_dict)
         acqf = qExpectedImprovement(model=gp, best_f=train_obj.max())
@@ -83,24 +97,34 @@ def optimize_sequential(problem, *, n_epoch, n_init, batch_size, seed=None):
         train_x = torch.cat((train_x, candidate_x))
         train_obj = torch.cat((train_obj, candidate_obj))
 
-        # update progress
-        best_idx = train_obj.argmax()
-        best_x.append(train_x[best_idx].detach())
-        best_obj.append(train_obj[best_idx].item())
-
+        # store progress
         state_dict = gp.state_dict()
+        generations.append(CandidateGeneration(train_x, train_obj))
 
-    return best_x, best_obj
+        if print_every is not None and (epoch % print_every == 0 or epoch == 1):
+            best_y = max(gen.best_y.item() for gen in generations)
+            print(f"Epoch = {epoch}, best objective = {best_y:.3f}")
+
+    return generations
 
 
-def run_sequential_trials(problem, *, n_trials, n_epoch, n_init, batch_size, seed=None):
+def run_sequential_trials(
+    problem: BaseTestProblem,
+    *,
+    n_trials: int,
+    n_epochs: int,
+    n_init: int,
+    batch_size: int,
+    seed=None,
+):
     best_obj_trial, obj_improvement_trial = [], []
     for n in range(n_trials):
         print(f"Running BO trial {n+1}/{n_trials}")
-        _, best_obj_trj = optimize_sequential(
-            problem, n_epoch=n_epoch, n_init=n_init, batch_size=batch_size, seed=seed
+        generations = optimize_sequential(
+            problem, n_epochs=n_epochs, n_init=n_init, batch_size=batch_size, seed=seed
         )
 
+        best_obj_trj = [g.best_y for g in generations]
         init_obj, final_obj = best_obj_trj[0], best_obj_trj[-1]
         best_obj_trial.append(final_obj)
 

@@ -124,9 +124,7 @@ class WaterOctanolMixture(BaseTestProblem):
                     f_oct = -self.composition_scale * (x_octanol - 0.9) ** 2
                     f_mol = -self.composition_scale * (x_mol - 0.05) ** 2
                     f_part = self.partition_scale * x_mol * x_water * K
-
                 objective = f_oct + f_mol + f_part
-                print((x_water, x_octanol, x_mol), (f_oct, f_mol, f_part))
             except:
                 objective = self.__min_objective_value
 
