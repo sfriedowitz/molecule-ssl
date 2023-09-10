@@ -23,7 +23,7 @@ class CandidateGeneration:
 
     @property
     def best_y(self):
-        return self.y[self._best_idx]
+        return self.y[self._best_idx].item()
 
 
 def generate_initial_data(n: int, problem: BaseTestProblem, *, gen=None):
@@ -102,7 +102,7 @@ def optimize_sequential(
         generations.append(CandidateGeneration(train_x, train_obj))
 
         if print_every is not None and (n % print_every == 0 or n == 1):
-            best_y = max(gen.best_y.item() for gen in generations)
+            best_y = max(gen.best_y for gen in generations)
             print(f"Generation = {n}, best objective = {best_y:.3f}")
 
     return generations

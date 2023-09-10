@@ -13,23 +13,39 @@ from src.vae import MolecularVAE
 from src.selfies import SelfiesEncoder
 
 
-class SingleMoleculeProblem(BaseTestProblem):
-    __min_objective_value = -100.0
+class VAETestProblem(BaseTestProblem):
+    min_objective_value = -100.0
 
+    def __init__(
+        self,
+        vae: MolecularVAE,
+        selfies_encoder: SelfiesEncoder,
+        dim: int,
+        domain_size: torch.Tensor,
+        noise_std: Optional[float] = None,
+    ):
+        self.dim = dim
+        self._bounds = [(-domain_size, domain_size) for _ in range(self.dim)]
+        super().__init__(noise_std=noise_std)
+        self.vae = vae
+        self.selfies_encoder = selfies_encoder
+
+    def get_molecule(self, z: torch.Tensor):
+        x = self.vae.decode(z.unsqueeze(0))[0]
+        s = self.selfies_encoder.decode_tensor(x)
+        return Chem.MolFromSmiles(sf.decoder(s))
+
+
+class SingleMoleculeProblem(VAETestProblem):
     def __init__(
         self,
         objective: Callable[[Any], float],
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
         domain_size: torch.Tensor,
-        noise: Optional[float] = None,
+        noise_std: Optional[float] = None,
     ):
-        self.dim = vae.latent_size
-        self._bounds = [(-domain_size, domain_size) for _ in range(self.dim)]
-        super().__init__(noise)
-
-        self.vae = vae
-        self.selfies_encoder = selfies_encoder
+        super().__init__(vae, selfies_encoder, vae.latent_size, domain_size, noise_std)
         self.objective = objective
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
@@ -43,7 +59,7 @@ class SingleMoleculeProblem(BaseTestProblem):
                 if math.isnan(obj):
                     raise ValueError("Unable to compute objective for molecule")
             except:
-                obj = self.__min_objective_value
+                obj = self.min_objective_value
             objective_values.append(obj)
         return torch.tensor(objective_values).unsqueeze(-1)
 
@@ -57,9 +73,9 @@ class PenalizedLogP(SingleMoleculeProblem):
         selfies_encoder: SelfiesEncoder,
         *,
         domain_size: float = 5.0,
-        noise: Optional[float] = None,
+        noise_std: Optional[float] = None,
     ):
-        super().__init__(molecules.penalized_logp, vae, selfies_encoder, domain_size, noise)
+        super().__init__(molecules.penalized_logp, vae, selfies_encoder, domain_size, noise_std)
 
 
 class PenalizedNP(SingleMoleculeProblem):
@@ -71,14 +87,12 @@ class PenalizedNP(SingleMoleculeProblem):
         selfies_encoder: SelfiesEncoder,
         *,
         domain_size: float = 5.0,
-        noise: Optional[float] = None,
+        noise_std: Optional[float] = None,
     ):
-        super().__init__(molecules.penalized_np, vae, selfies_encoder, domain_size, noise)
+        super().__init__(molecules.penalized_np, vae, selfies_encoder, domain_size, noise_std)
 
 
-class WaterOctanolMixture(BaseTestProblem):
-    __min_objective_value = -100.0
-
+class WaterOctanolMixture(VAETestProblem):
     def __init__(
         self,
         vae: MolecularVAE,
@@ -86,28 +100,18 @@ class WaterOctanolMixture(BaseTestProblem):
         *,
         domain_size: float = 5.0,
         sas_scale: float = 0.0,
-        noise: Optional[float] = None,
+        noise_std: Optional[float] = None,
     ):
-        self.dim = vae.latent_size + 3
-        self._bounds = [(-domain_size, domain_size) for _ in range(self.dim)]
-        super().__init__(noise)
-
-        self.vae = vae
-        self.selfies_encoder = selfies_encoder
+        dim = vae.latent_size + 3
+        super().__init__(vae, selfies_encoder, dim, domain_size, noise_std)
         self.sas_scale = sas_scale
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
         objective_values = []
         for xi in X:
-            x_comp = xi[:3]
-            x_comp = F.softmax(x_comp).tolist()
+            x_comp, mol = self.get_scaled_candidate(xi)
             x_water, x_octanol, x_mol = x_comp
-
-            z_latent = xi[3:]
-            x_recon = self.vae.decode(z_latent.view(1, -1))
-            selfie = self.selfies_encoder.decode_tensor(x_recon[0])
             try:
-                mol = Chem.MolFromSmiles(sf.decoder(selfie))
                 logp = Chem.Crippen.MolLogP(mol)
                 sas = sascorer.calculateScore(mol)
                 if math.isnan(logp) or math.isnan(sas):
@@ -122,8 +126,17 @@ class WaterOctanolMixture(BaseTestProblem):
                     f_comp = max(x_octanol - 0.5, 0.0) * x_mol * K
                 objective = f_comp - self.sas_scale * sas
             except:
-                objective = self.__min_objective_value
+                objective = self.min_objective_value
 
             objective_values.append(objective)
 
         return torch.tensor(objective_values).unsqueeze(-1)
+
+    def get_scaled_candidate(self, x: torch.Tensor):
+        x_comp = x[:3]
+        x_comp = F.softmax(x_comp).tolist()
+
+        z_latent = x[3:]
+        mol = self.get_molecule(z_latent)
+
+        return x_comp, mol

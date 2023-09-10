@@ -1,12 +1,4 @@
 import torch
-from rdkit import Chem
-import selfies as sf
-
-
-def z_to_mol(z, vae, selfies_encoder):
-    x = vae.decode(z.unsqueeze(0))[0]
-    s = selfies_encoder.decode_tensor(x)
-    return Chem.MolFromSmiles(sf.decoder(s))
 
 
 def slerp(start: torch.Tensor, end: torch.Tensor, t: float):
