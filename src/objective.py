@@ -20,8 +20,9 @@ class VAETestProblem(BaseTestProblem):
         self,
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
+        *,
         dim: int,
-        domain_size: torch.Tensor,
+        domain_size: float,
         noise_std: Optional[float] = None,
     ):
         self.dim = dim
@@ -42,10 +43,16 @@ class SingleMoleculeProblem(VAETestProblem):
         objective: Callable[[Any], float],
         vae: MolecularVAE,
         selfies_encoder: SelfiesEncoder,
-        domain_size: torch.Tensor,
+        domain_size: float,
         noise_std: Optional[float] = None,
     ):
-        super().__init__(vae, selfies_encoder, vae.latent_size, domain_size, noise_std)
+        super().__init__(
+            vae,
+            selfies_encoder,
+            dim=vae.latent_size,
+            domain_size=domain_size,
+            noise_std=noise_std,
+        )
         self.objective = objective
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
@@ -100,11 +107,18 @@ class WaterOctanolMixture(VAETestProblem):
         *,
         domain_size: float = 5.0,
         sas_scale: float = 0.0,
+        kmax: float = 1e4,
         noise_std: Optional[float] = None,
     ):
-        dim = vae.latent_size + 3
-        super().__init__(vae, selfies_encoder, dim, domain_size, noise_std)
+        super().__init__(
+            vae,
+            selfies_encoder,
+            dim=vae.latent_size + 3,
+            domain_size=domain_size,
+            noise_std=noise_std,
+        )
         self.sas_scale = sas_scale
+        self.kmax = kmax
 
     def evaluate_true(self, X: torch.Tensor) -> torch.Tensor:
         objective_values = []
@@ -116,13 +130,13 @@ class WaterOctanolMixture(VAETestProblem):
                 sas = sascorer.calculateScore(mol)
                 if math.isnan(logp) or math.isnan(sas):
                     raise ValueError("Unable to compute objective for molecule")
-
-                K = 10**logp
                 if x_water > x_octanol:
                     # Water > octanol, prefer low logP for partition into water phase
-                    f_comp = max(x_water - 0.5, 0.0) * x_mol * (1 / K)
+                    K = min(10 ** (-logp), self.kmax)
+                    f_comp = max(x_water - 0.5, 0.0) * x_mol * K
                 else:
                     # Octanol > water, prefer high logP for partition into octanol phase
+                    K = min(10**logp, self.kmax)
                     f_comp = max(x_octanol - 0.5, 0.0) * x_mol * K
                 objective = f_comp - self.sas_scale * sas
             except:
